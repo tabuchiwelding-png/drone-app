@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ドローン飛行</title>
+<script>const APP_VERSION = '1.2.0';</script>
 <style>
 /* ===== CSS変数 ===== */
 :root {
@@ -659,14 +660,15 @@ function altToZoom(alt) {
 
 // ===== HUD更新 =====
 function updateHUD() {
-  const altLabel = S.underwater ? `海中 ${Math.abs(Math.round(S.alt))}m` : `${Math.round(S.alt)}m`;
+  const isUnder = S.camMode === 'underwater';
+  const altLabel = isUnder ? `海中 ${Math.abs(Math.round(S.alt))}m` : `${Math.round(S.alt)}m`;
   document.getElementById('alt-display').textContent = altLabel;
-  document.getElementById('alt-display').className = 'hud-v' + (S.underwater ? ' blue' : S.alt < 30 ? ' warn' : '');
+  document.getElementById('alt-display').className = 'hud-v' + (isUnder ? ' blue' : S.alt < 30 ? ' warn' : '');
   document.getElementById('spd-display').textContent = Math.round(S.speed) + ' km/h';
   document.getElementById('spd-display').className = 'hud-v' + (S.speed > 60 ? ' warn' : '');
-  document.getElementById('alt-num').textContent = S.underwater ? `↓${Math.abs(Math.round(S.alt))}` : Math.round(S.alt);
+  document.getElementById('alt-num').textContent = isUnder ? `↓${Math.abs(Math.round(S.alt))}` : Math.round(S.alt);
   document.getElementById('coords').textContent = S.lat.toFixed(4) + '° N / ' + S.lng.toFixed(4) + '° E';
-  document.getElementById('mode-display').textContent = S.autoFly ? '自動飛行' : S.underwater ? '海中モード' : '手動';
+  document.getElementById('mode-display').textContent = S.autoFly ? '自動飛行' : isUnder ? '海中モード' : '手動';
 }
 
 // ===== ジョイスティック =====
@@ -824,12 +826,8 @@ function setCam(mode) {
   document.querySelectorAll('.cam-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('cam-' + (mode === 'underwater' ? 'under' : mode)).classList.add('active');
 
-  if (mode === 'underwater') {
-    S.alt = -80;
-  } else if (mode === 'low') {
+  if (mode === 'low') {
     S.alt = 50;
-  } else if (mode === 'top') {
-    S.tilt = 0;
   }
 }
 
