@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>DRONE FLIGHT</title>
+<style>
+  /* ===== CSS VARIABLES ===== */
+  :root {
+    --bg: #0a0c10;
+    --hud: rgba(0, 255, 180, 0.85);
+    --hud-dim: rgba(0, 255, 180, 0.3);
+    --hud-bg: rgba(0, 20, 15, 0.85);
+    --danger: #ff3b3b;
+    --warn: #ffaa00;
+    --accent: #00ffb4;
+    --text: #e0fff5;
+    --panel-bg: rgba(5, 15, 12, 0.92);
+    --border: rgba(0, 255, 180, 0.2);
+    --font-hud: 'Courier New', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    font-family: var(--font-hud);
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+    touch-action: none;
+  }
+
+  /* ===== MAP ===== */
+  #map {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ===== SCAN LINE OVERLAY ===== */
+  #scanlines {
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* ===== CROSSHAIR ===== */
+  #crosshair {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 60px;
+    height: 60px;
+    pointer-events: none;
+    z-index: 20;
+  }
+  #crosshair::before, #crosshair::after {
+    content: '';
+    position: absolute;
+    background: var(--accent);
+    opacity: 0.7;
+  }
+  #crosshair::before {
+    top: 50%; left: 0;
+    width: 100%; height: 1px;
+    transform: translateY(-50%);
+  }
+  #crosshair::after {
+    left: 50%; top: 0;
+    height: 100%; width: 1px;
+    transform: translateX(-50%);
+  }
+  .ch-corner {
+    position: absolute;
+    width: 10px; height: 10px;
+    border-color: var(--accent);
+    border-style: solid;
+    opacity: 0.9;
+  }
+  .ch-tl { top: 0; left: 0; border-width: 2px 0 0 2px; }
+  .ch-tr { top: 0; right: 0; border-width: 2px 2px 0 0; }
+  .ch-bl { bottom: 0; left: 0; border-width: 0 0 2px 2px; }
+  .ch-br { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+
+  /* ===== TOP HUD ===== */
+  #hud-top {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    padding: 12px 16px 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    z-index: 30;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);
+    pointer-events: none;
+  }
+
+  .hud-block {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .hud-label {
+    font-size: 9px;
+    color: var(--hud-dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .hud-value {
+    font-size: 18px;
+    color: var(--accent);
+    font-weight: bold;
+    letter-spacing: 1px;
+    text-shadow: 0 0 10px var(--accent);
+  }
+
+  .hud-value.warn { color: var(--warn); text-shadow: 0 0 10px var(--warn); }
+  .hud-value.danger { color: var(--danger); text-shadow: 0 0 10px var(--danger); }
+
+  /* ===== ALTITUDE BAR (right side) ===== */
+  #alt-bar {
+    position: fixed;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 180px;
+    z-index: 30;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .alt-label { font-size: 8px; color: var(--hud-dim); letter-spacing: 1px; }
+  #alt-track {
+    flex: 1;
+    width: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    position: relative;
+    overflow: hidden;
+  }
+  #alt-fill {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: linear-gradient(to top, var(--accent), rgba(0,255,180,0.2));
+    transition: height 0.3s ease;
+    border-radius: 2px;
+  }
+  #alt-num { font-size: 10px; color: var(--accent); }
+
+  /* ===== SPEED BAR (left side) ===== */
+  #spd-bar {
+    position: fixed;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 180px;
+    z-index: 30;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /* ===== BOTTOM HUD ===== */
+  #hud-bottom {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    padding: 8px 16px 20px;
+    z-index: 30;
+    background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+  }
+
+  /* ===== CONTROLS ===== */
+  #controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    align-items: end;
+  }
+
+  /* Joystick */
+  .joystick-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .joy-label {
+    font-size: 8px;
+    color: var(--hud-dim);
+    letter-spacing: 2px;
+  }
+  .joystick-base {
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    background: var(--panel-bg);
+    position: relative;
+    touch-action: none;
+  }
+  .joystick-ring {
+    position: absolute;
+    inset: 8px;
+    border-radius: 50%;
+    border: 1px solid rgba(0,255,180,0.1);
+  }
+  .joystick-knob {
+    position: absolute;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, rgba(0,255,180,0.9), rgba(0,200,140,0.6));
+    border: 1.5px solid var(--accent);
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 12px rgba(0,255,180,0.5);
+    pointer-events: none;
+    transition: box-shadow 0.1s;
+  }
+
+  /* Alt controls */
+  .alt-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .alt-btn {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    background: var(--panel-bg);
+    color: var(--accent);
+    font-size: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    transition: all 0.1s;
+  }
+  .alt-btn:active {
+    background: rgba(0,255,180,0.15);
+    box-shadow: 0 0 15px rgba(0,255,180,0.4);
+    transform: scale(0.95);
+  }
+  .alt-btn-label { font-size: 8px; color: var(--hud-dim); letter-spacing: 1px; }
+
+  /* ===== STATUS BAR ===== */
+  #status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    padding: 4px 0;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .status-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+  }
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  .status-dot.warn { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+
+  /* ===== TITLE ===== */
+  #title {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    z-index: 50;
+    pointer-events: none;
+  }
+  #title h1 {
+    font-size: 28px;
+    color: var(--accent);
+    letter-spacing: 8px;
+    text-shadow: 0 0 20px var(--accent);
+    text-transform: uppercase;
+  }
+  #title p {
+    font-size: 10px;
+    color: var(--hud-dim);
+    letter-spacing: 4px;
+    margin-top: 4px;
+  }
+
+  /* ===== LOADING ===== */
+  #loading {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    gap: 16px;
+  }
+  #loading h2 {
+    color: var(--accent);
+    letter-spacing: 6px;
+    font-size: 16px;
+    text-shadow: 0 0 20px var(--accent);
+  }
+  .load-bar {
+    width: 200px;
+    height: 2px;
+    background: var(--border);
+    border-radius: 1px;
+    overflow: hidden;
+  }
+  .load-fill {
+    height: 100%;
+    background: var(--accent);
+    animation: loadanim 1.5s ease forwards;
+    box-shadow: 0 0 8px var(--accent);
+  }
+  @keyframes loadanim {
+    from { width: 0; }
+    to { width: 100%; }
+  }
+  #loading p {
+    font-size: 10px;
+    color: var(--hud-dim);
+    letter-spacing: 3px;
+    animation: blink 1s infinite;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
+
+  /* ===== AUTO FLY BUTTON ===== */
+  #auto-btn {
+    position: fixed;
+    top: 80px;
+    right: 50px;
+    z-index: 30;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-family: var(--font-hud);
+    font-size: 9px;
+    letter-spacing: 2px;
+    padding: 6px 10px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  #auto-btn.active {
+    background: rgba(0,255,180,0.2);
+    border-color: var(--accent);
+    box-shadow: 0 0 10px rgba(0,255,180,0.3);
+  }
+
+  /* ===== COORDS ===== */
+  #coords {
+    position: fixed;
+    bottom: 180px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 9px;
+    color: var(--hud-dim);
+    letter-spacing: 1px;
+    z-index: 30;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<!-- Loading Screen -->
+<div id="loading">
+  <h2>◈ DRONE FLIGHT</h2>
+  <div class="load-bar"><div class="load-fill"></div></div>
+  <p>INITIALIZING NAVIGATION SYSTEM...</p>
+</div>
+
+<!-- Map -->
+<div id="map"></div>
+
+<!-- Scan Lines -->
+<div id="scanlines"></div>
+
+<!-- Crosshair -->
+<div id="crosshair">
+  <div class="ch-corner ch-tl"></div>
+  <div class="ch-corner ch-tr"></div>
+  <div class="ch-corner ch-bl"></div>
+  <div class="ch-corner ch-br"></div>
+</div>
+
+<!-- Top HUD -->
+<div id="hud-top">
+  <div class="hud-block">
+    <span class="hud-label">ALTITUDE</span>
+    <span class="hud-value" id="alt-display">150m</span>
+  </div>
+  <div class="hud-block" style="align-items:center">
+    <span class="hud-label">◈ DRONE FLIGHT</span>
+    <span class="hud-value" style="font-size:11px" id="mode-display">MANUAL</span>
+  </div>
+  <div class="hud-block" style="align-items:flex-end">
+    <span class="hud-label">SPEED</span>
+    <span class="hud-value" id="spd-display">0 km/h</span>
+  </div>
+</div>
+
+<!-- Auto Fly -->
+<button id="auto-btn" onclick="toggleAuto()">AUTO</button>
+
+<!-- Altitude Bar -->
+<div id="alt-bar">
+  <span class="alt-label">ALT</span>
+  <div id="alt-track"><div id="alt-fill" style="height:30%"></div></div>
+  <span class="alt-num" id="alt-num">150</span>
+</div>
+
+<!-- Coords -->
+<div id="coords" id="coords">35.6762° N / 139.6503° E</div>
+
+<!-- Bottom HUD -->
+<div id="hud-bottom">
+  <div id="status-bar">
+    <div class="status-item">
+      <div class="status-dot"></div>
+      <span class="hud-label">GPS</span>
+    </div>
+    <div class="status-item">
+      <div class="status-dot"></div>
+      <span class="hud-label">LINK</span>
+    </div>
+    <div class="status-item">
+      <div class="status-dot" id="bat-dot"></div>
+      <span class="hud-label" id="bat-label">BAT 100%</span>
+    </div>
+    <div class="status-item">
+      <div class="status-dot"></div>
+      <span class="hud-label">CAM</span>
+    </div>
+  </div>
+
+  <div id="controls">
+    <!-- Left Joystick: Move -->
+    <div class="joystick-wrap">
+      <span class="joy-label">MOVE</span>
+      <div class="joystick-base" id="joy-move">
+        <div class="joystick-ring"></div>
+        <div class="joystick-knob" id="knob-move"></div>
+      </div>
+    </div>
+
+    <!-- Right: Altitude -->
+    <div class="alt-controls">
+      <button class="alt-btn" id="btn-up">▲</button>
+      <span class="alt-btn-label">ALTITUDE</span>
+      <button class="alt-btn" id="btn-down">▼</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== STATE =====
+const state = {
+  lat: 35.6762,
+  lng: 139.6503,
+  altitude: 150,
+  speed: 0,
+  heading: 0,
+  tilt: 45,
+  autoFly: false,
+  autoAngle: 0,
+  battery: 100,
+  map: null,
+  joystickActive: false,
+  joyDx: 0,
+  joyDy: 0,
+  altInterval: null,
+  altDir: 0,
+};
+
+const MAX_ALT = 500;
+const MIN_ALT = 30;
+const SPEED_MS = 0.00008;
+
+// ===== MAP INIT =====
+function initMap() {
+  state.map = new google.maps.Map(document.getElementById('map'), {
+    center: { lat: state.lat, lng: state.lng },
+    zoom: 17,
+    mapTypeId: 'satellite',
+    tilt: state.tilt,
+    heading: state.heading,
+    disableDefaultUI: true,
+    gestureHandling: 'none',
+    keyboardShortcuts: false,
+  });
+
+  // Hide loading after map loads
+  state.map.addListener('tilesloaded', () => {
+    setTimeout(() => {
+      document.getElementById('loading').style.display = 'none';
+    }, 800);
+  });
+
+  startLoop();
+  setupJoystick();
+  setupAltButtons();
+  startBattery();
+}
+
+// ===== MAIN LOOP =====
+function startLoop() {
+  setInterval(() => {
+    if (state.autoFly) {
+      autoFlyStep();
+    } else if (state.joystickActive) {
+      manualFlyStep();
+    } else {
+      state.speed = Math.max(0, state.speed - 2);
+    }
+
+    // Altitude
+    if (state.altDir !== 0) {
+      state.altitude = Math.max(MIN_ALT, Math.min(MAX_ALT, state.altitude + state.altDir * 3));
+    }
+
+    updateMap();
+    updateHUD();
+  }, 50);
+}
+
+function manualFlyStep() {
+  const rad = (state.heading * Math.PI) / 180;
+  const fwd = -state.joyDy;
+  const strafe = state.joyDx;
+
+  state.lat += (Math.cos(rad) * fwd - Math.sin(rad) * strafe) * SPEED_MS;
+  state.lng += (Math.sin(rad) * fwd + Math.cos(rad) * strafe) * SPEED_MS;
+
+  const mag = Math.sqrt(state.joyDx ** 2 + state.joyDy ** 2);
+  state.speed = Math.round(mag * 60);
+
+  if (Math.abs(state.joyDx) > 0.1) {
+    state.heading = (state.heading + state.joyDx * 2) % 360;
+  }
+}
+
+function autoFlyStep() {
+  state.autoAngle += 0.008;
+  const r = 0.002;
+  const cx = 35.6762, cy = 139.6503;
+  state.lat = cx + Math.cos(state.autoAngle) * r;
+  state.lng = cy + Math.sin(state.autoAngle) * r;
+  state.heading = (state.autoAngle * 180 / Math.PI + 90) % 360;
+  state.speed = 28;
+  state.altitude = 200 + Math.sin(state.autoAngle * 2) * 50;
+}
+
+function updateMap() {
+  if (!state.map) return;
+  state.map.moveCamera({
+    center: { lat: state.lat, lng: state.lng },
+    heading: state.heading,
+    tilt: state.tilt,
+    zoom: altToZoom(state.altitude),
+  });
+}
+
+function altToZoom(alt) {
+  // 30m→19, 500m→14
+  return Math.max(14, Math.min(19, 19 - (alt - 30) / 94));
+}
+
+// ===== HUD UPDATE =====
+function updateHUD() {
+  document.getElementById('alt-display').textContent = Math.round(state.altitude) + 'm';
+  document.getElementById('spd-display').textContent = Math.round(state.speed) + ' km/h';
+  document.getElementById('alt-num').textContent = Math.round(state.altitude);
+
+  const altPct = ((state.altitude - MIN_ALT) / (MAX_ALT - MIN_ALT)) * 100;
+  document.getElementById('alt-fill').style.height = altPct + '%';
+
+  document.getElementById('coords').textContent =
+    state.lat.toFixed(4) + '° N / ' + state.lng.toFixed(4) + '° E';
+
+  // Speed color
+  const spdEl = document.getElementById('spd-display');
+  spdEl.className = 'hud-value' + (state.speed > 50 ? ' warn' : '');
+
+  // Altitude color
+  const altEl = document.getElementById('alt-display');
+  altEl.className = 'hud-value' + (state.altitude < 50 ? ' danger' : state.altitude > 400 ? ' warn' : '');
+}
+
+// ===== JOYSTICK =====
+function setupJoystick() {
+  const base = document.getElementById('joy-move');
+  const knob = document.getElementById('knob-move');
+  const radius = 30;
+  let startX, startY;
+
+  function getPos(e) {
+    const t = e.touches ? e.touches[0] : e;
+    return { x: t.clientX, y: t.clientY };
+  }
+
+  function onStart(e) {
+    e.preventDefault();
+    const rect = base.getBoundingClientRect();
+    startX = rect.left + rect.width / 2;
+    startY = rect.top + rect.height / 2;
+    state.joystickActive = true;
+    onMove(e);
+  }
+
+  function onMove(e) {
+    if (!state.joystickActive) return;
+    e.preventDefault();
+    const pos = getPos(e);
+    let dx = pos.x - startX;
+    let dy = pos.y - startY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > radius) {
+      dx = (dx / dist) * radius;
+      dy = (dy / dist) * radius;
+    }
+    state.joyDx = dx / radius;
+    state.joyDy = dy / radius;
+    knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    knob.style.boxShadow = `0 0 ${12 + dist / 3}px rgba(0,255,180,0.7)`;
+  }
+
+  function onEnd(e) {
+    state.joystickActive = false;
+    state.joyDx = 0;
+    state.joyDy = 0;
+    knob.style.transform = 'translate(-50%, -50%)';
+    knob.style.boxShadow = '0 0 12px rgba(0,255,180,0.5)';
+  }
+
+  base.addEventListener('touchstart', onStart, { passive: false });
+  base.addEventListener('touchmove', onMove, { passive: false });
+  base.addEventListener('touchend', onEnd);
+  base.addEventListener('mousedown', onStart);
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onEnd);
+}
+
+// ===== ALT BUTTONS =====
+function setupAltButtons() {
+  const up = document.getElementById('btn-up');
+  const dn = document.getElementById('btn-down');
+
+  function startUp(e) { e.preventDefault(); state.altDir = 1; }
+  function startDn(e) { e.preventDefault(); state.altDir = -1; }
+  function stopAlt(e) { state.altDir = 0; }
+
+  up.addEventListener('touchstart', startUp, { passive: false });
+  up.addEventListener('mousedown', startUp);
+  dn.addEventListener('touchstart', startDn, { passive: false });
+  dn.addEventListener('mousedown', startDn);
+
+  [up, dn].forEach(b => {
+    b.addEventListener('touchend', stopAlt);
+    b.addEventListener('mouseup', stopAlt);
+  });
+}
+
+// ===== AUTO FLY =====
+function toggleAuto() {
+  state.autoFly = !state.autoFly;
+  const btn = document.getElementById('auto-btn');
+  const mode = document.getElementById('mode-display');
+  if (state.autoFly) {
+    btn.classList.add('active');
+    btn.textContent = '■ STOP';
+    mode.textContent = 'AUTO';
+    // Center auto on Tokyo
+    state.autoAngle = 0;
+  } else {
+    btn.classList.remove('active');
+    btn.textContent = 'AUTO';
+    mode.textContent = 'MANUAL';
+    state.speed = 0;
+  }
+}
+
+// ===== BATTERY DRAIN =====
+function startBattery() {
+  setInterval(() => {
+    state.battery = Math.max(0, state.battery - 0.05);
+    const pct = Math.round(state.battery);
+    const el = document.getElementById('bat-label');
+    const dot = document.getElementById('bat-dot');
+    el.textContent = 'BAT ' + pct + '%';
+    if (pct < 20) {
+      dot.className = 'status-dot warn';
+    }
+  }, 3000);
+}
+</script>
+
+<!-- Google Maps API -->
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBS9BWvAJhucY2Jf1cwLXTEWMRjxLkAENI&callback=initMap&v=beta&map_ids=&libraries=maps3d" async defer></script>
+
+</body>
+</html>
