@@ -613,7 +613,6 @@ function startLoop() {
     if (S.altDir !== 0) {
       S.alt = Math.max(MIN_ALT, Math.min(MAX_ALT, S.alt + S.altDir * 4));
     }
-    S.underwater = S.alt < 0;
     updateMap();
     updateHUD();
   }, 50);
@@ -648,8 +647,9 @@ function updateMap() {
     zoom: altToZoom(Math.abs(S.alt)),
   });
   // 海中エフェクト
-  document.getElementById('map').classList.toggle('underwater', S.underwater);
-  document.getElementById('underwater-overlay').classList.toggle('active', S.underwater || S.camMode === 'underwater');
+  const isUnder = S.camMode === 'underwater';
+  document.getElementById('map').classList.toggle('underwater', isUnder);
+  document.getElementById('underwater-overlay').classList.toggle('active', isUnder);
 }
 
 function altToZoom(alt) {
