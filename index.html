@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ドローン飛行</title>
-<script>const APP_VERSION = '6.1.0';</script>
+<script>const APP_VERSION = '6.1.1';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
@@ -508,46 +508,68 @@ window.addEventListener('resize', () => {
 function setupJoy(baseId, knobId, onMove, onEnd) {
   const base = document.getElementById(baseId);
   const knob = document.getElementById(knobId);
-  let sx = 0, sy = 0, active = false;
+  let sx = 0, sy = 0;
+  let touchId = null;
 
-  function getPoint(e) {
-    const t = e.touches?.[0] || e;
-    return { x: t.clientX, y: t.clientY };
-  }
-
-  function start(e) {
-    e.preventDefault();
-    const r = base.getBoundingClientRect();
-    sx = r.left + r.width / 2;
-    sy = r.top + r.height / 2;
-    active = true;
-    move(e);
-  }
-
-  function move(e) {
-    if (!active) return;
-    e.preventDefault();
-    const p = getPoint(e);
-    let dx = p.x - sx, dy = p.y - sy;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    if (dist > JOY_R) { dx = dx/dist*JOY_R; dy = dy/dist*JOY_R; }
+  function applyMove(rawDx, rawDy) {
+    const dist = Math.sqrt(rawDx*rawDx + rawDy*rawDy);
+    let dx = rawDx, dy = rawDy;
+    if (dist > JOY_R) { dx = rawDx/dist*JOY_R; dy = rawDy/dist*JOY_R; }
     onMove(dx/JOY_R, dy/JOY_R);
     knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
   }
 
-  function end() {
-    active = false;
-    onEnd();
-    knob.style.transform = 'translate(-50%, -50%)';
-  }
+  // タッチ：IDで追跡（他の指の影響を受けない）
+  base.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (touchId !== null) return;
+    const t = e.changedTouches[0];
+    touchId = t.identifier;
+    const r = base.getBoundingClientRect();
+    sx = r.left + r.width / 2;
+    sy = r.top + r.height / 2;
+    applyMove(t.clientX - sx, t.clientY - sy);
+  }, { passive: false });
 
-  base.addEventListener('touchstart', start, { passive: false });
-  base.addEventListener('touchmove', move, { passive: false });
-  base.addEventListener('touchend', end);
-  base.addEventListener('touchcancel', end);
-  base.addEventListener('mousedown', e => { sx=e.clientX; sy=e.clientY; active=true; });
-  window.addEventListener('mousemove', move);
-  window.addEventListener('mouseup', end);
+  base.addEventListener('touchmove', e => {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      if (t.identifier === touchId) {
+        applyMove(t.clientX - sx, t.clientY - sy);
+        break;
+      }
+    }
+  }, { passive: false });
+
+  function onTouchEnd(e) {
+    for (const t of e.changedTouches) {
+      if (t.identifier === touchId) {
+        touchId = null;
+        onEnd();
+        knob.style.transform = 'translate(-50%, -50%)';
+        break;
+      }
+    }
+  }
+  base.addEventListener('touchend', onTouchEnd);
+  base.addEventListener('touchcancel', onTouchEnd);
+
+  // マウス：base要素内のみ（windowに登録しない）
+  let mouseDown = false;
+  base.addEventListener('mousedown', e => {
+    mouseDown = true;
+    const r = base.getBoundingClientRect();
+    sx = r.left + r.width / 2;
+    sy = r.top + r.height / 2;
+    applyMove(e.clientX - sx, e.clientY - sy);
+  });
+  base.addEventListener('mousemove', e => {
+    if (!mouseDown) return;
+    applyMove(e.clientX - sx, e.clientY - sy);
+  });
+  const stopMouse = () => { if (mouseDown) { mouseDown = false; onEnd(); knob.style.transform = 'translate(-50%, -50%)'; } };
+  base.addEventListener('mouseup', stopMouse);
+  base.addEventListener('mouseleave', stopMouse);
 }
 
 // 左スティック：移動
