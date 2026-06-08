@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ドローン飛行</title>
-<script>const APP_VERSION = '6.0.0';</script>
+<script>const APP_VERSION = '6.1.0';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
@@ -417,9 +417,8 @@ water.rotation.x = -Math.PI/2; water.position.set(900, 0.15, 600); scene.add(wat
 // ===== カメラ更新 =====
 // ドローンは世界座標(0,S.alt,0)固定、ワールドを動かす方式
 function updateCamera() {
-  const totalYaw = S.heading + S.camYawOffset;
   camera.position.set(0, S.alt, 0);
-  camera.rotation.y = -totalYaw * Math.PI / 180;
+  camera.rotation.y = -S.heading * Math.PI / 180;
   camera.rotation.x = S.camPitch * Math.PI / 180;
 }
 
@@ -439,31 +438,29 @@ function mainLoop(ts) {
     scene.position.x -= Math.sin(headRad) * 0.45;
     scene.position.z -= Math.cos(headRad) * 0.45;
   } else {
-    // 手動操作
+    // 手動操作：左スティック = heading方向に移動（視界と完全分離）
     if (S.moveActive) {
       const spd = SPEED_MAP[S.speedMode];
-      // 視界方向（heading+camYawOffset）に沿って移動
-      const totalYaw = (S.heading + S.camYawOffset) * Math.PI / 180;
-      const fwd = -S.moveDy;  // スティック前=前進
-      const str = S.moveDx;   // スティック右=右移動
+      const headRad = S.heading * Math.PI / 180;
+      const fwd = -S.moveDy;  // 前後
+      const str = S.moveDx;   // 左右
       const mv = spd * dt;
-      const mag = Math.sqrt(S.moveDx**2 + S.moveDy**2);
-      scene.position.x -= (Math.sin(totalYaw)*fwd + Math.cos(totalYaw)*str) * mv;
-      scene.position.z -= (Math.cos(totalYaw)*fwd - Math.sin(totalYaw)*str) * mv;
-      S.speed = Math.round(spd * mag * 3.6 * 0.08);
-      // 座標更新
-      S.lat -= (Math.cos(totalYaw)*fwd - Math.sin(totalYaw)*str) * mv * 0.000009;
-      S.lng += (Math.sin(totalYaw)*fwd + Math.cos(totalYaw)*str) * mv * 0.000009;
-      // 進行方向に向きを徐々に合わせる（左右移動時）
-      S.heading = (S.heading + S.camYawOffset * 0.02) % 360;
+      const mag = Math.min(1, Math.sqrt(S.moveDx**2 + S.moveDy**2));
+      scene.position.x -= (Math.sin(headRad)*fwd + Math.cos(headRad)*str) * mv;
+      scene.position.z -= (Math.cos(headRad)*fwd - Math.sin(headRad)*str) * mv;
+      S.speed = Math.round(spd * mag * 3.6 * 0.1);
+      S.lat -= (Math.cos(headRad)*fwd - Math.sin(headRad)*str) * mv * 0.000009;
+      S.lng += (Math.sin(headRad)*fwd + Math.cos(headRad)*str) * mv * 0.000009;
     } else {
       S.speed = Math.max(0, S.speed - 2);
     }
 
-    // 右スティック：カメラ回転
+    // 右スティック：カメラのみ回転（移動に影響しない）
     if (S.camActive) {
-      S.camYawOffset += S.camDx * 1.8;
-      S.camPitch = Math.max(CAM_PITCH_MIN, Math.min(CAM_PITCH_MAX, S.camPitch - S.camDy * 1.5));
+      // 左右 → heading（ドローン本体の向き）を変える
+      S.heading = (S.heading + S.camDx * 2.0 + 360) % 360;
+      // 上下 → カメラピッチのみ
+      S.camPitch = Math.max(CAM_PITCH_MIN, Math.min(CAM_PITCH_MAX, S.camPitch - S.camDy * 1.8));
     }
   }
 
@@ -598,9 +595,7 @@ function toggleAuto() {
 }
 
 function resetView() {
-  // カメラを正面・水平に戻す
   S.camPitch = -8;
-  S.camYawOffset = 0;
 }
 
 function closeGuide() {
@@ -621,7 +616,7 @@ function switchTab(tab) {
 
 function flyTo(lat, lng, name, btn) {
   S.lat=lat; S.lng=lng; S.currentCity=name; S.alt=30; S.speed=0;
-  S.camPitch=-8; S.camYawOffset=0;
+  S.camPitch=-8;
   scene.position.set(0, 0, 0); // ワールドをリセット
   document.querySelectorAll('.city-btn').forEach(b => b.classList.remove('selected'));
   if (btn) btn.classList.add('selected');
