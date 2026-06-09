@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ドローン飛行</title>
-<script>const APP_VERSION = '8.0.0';</script>
+<script>const APP_VERSION = '9.0.0';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
@@ -342,17 +342,32 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = false;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB);
-scene.fog = new THREE.FogExp2(0xb8daf8, 0.00025);
+// 空：グラデーションテクスチャ
+(()=>{
+  const cv=document.createElement('canvas');
+  cv.width=2;cv.height=256;
+  const ctx=cv.getContext('2d');
+  const g=ctx.createLinearGradient(0,0,0,256);
+  g.addColorStop(0,   '#1a6fbd');
+  g.addColorStop(0.4, '#4fa0d8');
+  g.addColorStop(0.75,'#a8d4f0');
+  g.addColorStop(1,   '#d8edf8');
+  ctx.fillStyle=g;ctx.fillRect(0,0,2,256);
+  scene.background=new THREE.CanvasTexture(cv);
+})();
+scene.fog = new THREE.FogExp2(0xc0ddf0, 0.00018);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.5, 5000);
 camera.rotation.order = 'YXZ';
 
-// ===== 照明 =====
-scene.add(new THREE.AmbientLight(0xb0ccff, 0.9));
-const sun = new THREE.DirectionalLight(0xfff8e8, 1.2);
-sun.position.set(400, 900, 300);
+// ===== 照明（昼光色・強化） =====
+scene.add(new THREE.AmbientLight(0xd0e8ff, 1.1));
+const sun = new THREE.DirectionalLight(0xfff5e0, 1.6);
+sun.position.set(500, 800, 300);
 scene.add(sun);
+const fillLight = new THREE.DirectionalLight(0xd0eeff, 0.4);
+fillLight.position.set(-200, 100, -400);
+scene.add(fillLight);
 
 // ===== ワールドグループ（座標変換用） =====
 const world = new THREE.Group();
@@ -360,7 +375,7 @@ scene.add(world);
 
 // ===== 地面 =====
 const groundGeo = new THREE.PlaneGeometry(6000, 6000);
-const groundMat = new THREE.MeshLambertMaterial({ color: 0x4a7c3f });
+const groundMat = new THREE.MeshLambertMaterial({ color: 0x8a9070 });
 const ground = new THREE.Mesh(groundGeo, groundMat);
 ground.rotation.x = -Math.PI / 2;
 ground.position.y = -0.1;
@@ -375,68 +390,101 @@ function latLngToXZ(lat, lng, originLat, originLng) {
   return { x, z };
 }
 
-// ===== 建物マテリアルキャッシュ =====
+// ===== 建物テクスチャ（昼光色） =====
 function makeFacadeTex(type) {
   const sz = 256;
   const cv = document.createElement('canvas');
   cv.width = sz; cv.height = sz;
   const ctx = cv.getContext('2d');
   if (type === 'office') {
-    ctx.fillStyle = '#1a2a3a'; ctx.fillRect(0,0,sz,sz);
-    ctx.fillStyle = '#0d1520';
-    for (let x=0;x<sz;x+=32) ctx.fillRect(x,0,3,sz);
-    for (let y=0;y<sz;y+=24) ctx.fillRect(0,y,sz,3);
-    for (let col=0;col<7;col++) for (let row=0;row<9;row++) {
-      const lit=Math.random();
-      ctx.fillStyle = lit<0.55 ? `rgb(${200+Math.random()*55|0},${220+Math.random()*35|0},${180+Math.random()*75|0})` : lit<0.75 ? '#aabbcc' : '#0e1c2b';
-      ctx.fillRect(col*32+5, row*24+5, 22, 14);
+    const gl = 40 + Math.random()*20;
+    ctx.fillStyle = `hsl(210,${20+Math.random()*15|0}%,${gl|0}%)`;
+    ctx.fillRect(0,0,sz,sz);
+    ctx.fillStyle = `hsl(210,10%,${gl-8|0}%)`;
+    for(let x=0;x<sz;x+=30) ctx.fillRect(x,0,3,sz);
+    for(let y=0;y<sz;y+=22) ctx.fillRect(0,y,sz,2);
+    for(let col=0;col<8;col++) for(let row=0;row<10;row++){
+      const ref=Math.random();
+      if(ref<0.3) ctx.fillStyle=`hsl(${200+Math.random()*20|0},${50+Math.random()*20|0}%,${60+Math.random()*20|0}%)`;
+      else if(ref<0.6) ctx.fillStyle=`hsl(200,20%,${75+Math.random()*15|0}%)`;
+      else ctx.fillStyle=`hsl(220,15%,${25+Math.random()*15|0}%)`;
+      ctx.fillRect(col*30+4,row*22+3,22,16);
     }
   } else if (type === 'residential') {
-    ctx.fillStyle = `hsl(${30+Math.random()*20|0},${15+Math.random()*15|0}%,${62+Math.random()*12|0}%)`;
+    const wl=68+Math.random()*15, ws=8+Math.random()*12;
+    ctx.fillStyle=`hsl(${20+Math.random()*30|0},${ws|0}%,${wl|0}%)`;
     ctx.fillRect(0,0,sz,sz);
-    ctx.fillStyle='rgba(0,0,0,0.12)';
-    for (let y=0;y<sz;y+=36) ctx.fillRect(0,y+32,sz,4);
-    for (let col=0;col<5;col++) for (let row=0;row<6;row++) {
-      const wx=col*46+10, wy=row*36+8;
-      ctx.fillStyle=Math.random()<0.4?'#ffe8a0':Math.random()<0.6?'#b0c8e0':'#445';
-      ctx.fillRect(wx,wy,26,20);
-      ctx.fillStyle='rgba(255,255,255,0.25)';
-      ctx.fillRect(wx+12,wy,2,20); ctx.fillRect(wx,wy+10,26,2);
+    ctx.fillStyle='rgba(0,0,0,0.08)';
+    for(let y=0;y<sz;y+=34) ctx.fillRect(0,y,sz,2);
+    for(let col=0;col<5;col++) for(let row=0;row<6;row++){
+      const wx2=col*46+10, wy=row*34+7;
+      const wt=Math.random();
+      if(wt<0.5) ctx.fillStyle=`hsl(${200+Math.random()*20|0},${30+Math.random()*20|0}%,${55+Math.random()*20|0}%)`;
+      else if(wt<0.75) ctx.fillStyle=`hsl(40,60%,${70+Math.random()*20|0}%)`;
+      else ctx.fillStyle='#334';
+      ctx.fillRect(wx2,wy,26,20);
+      ctx.fillStyle='rgba(255,255,255,0.3)';
+      ctx.fillRect(wx2+12,wy,2,20);ctx.fillRect(wx2,wy+10,26,2);
     }
   } else {
-    ctx.fillStyle=`hsl(${200+Math.random()*40|0},20%,55%)`; ctx.fillRect(0,0,sz,sz);
-    ctx.fillStyle='rgba(180,220,255,0.55)'; ctx.fillRect(20,40,sz-40,80);
-    ctx.fillStyle='rgba(180,220,255,0.4)'; ctx.fillRect(20,150,sz-40,60);
+    const cl=60+Math.random()*20;
+    ctx.fillStyle=`hsl(${30+Math.random()*30|0},${10+Math.random()*15|0}%,${cl|0}%)`;
+    ctx.fillRect(0,0,sz,sz);
+    ctx.fillStyle=`hsl(200,${30+Math.random()*20|0}%,${55+Math.random()*20|0}%)`;
+    ctx.fillRect(15,sz*0.25,sz-30,sz*0.35);
+    ctx.strokeStyle='rgba(200,200,200,0.5)';ctx.lineWidth=2;ctx.setLineDash([]);
+    ctx.strokeRect(15,sz*0.25,sz-30,sz*0.35);
+    for(let col=0;col<4;col++){
+      ctx.fillStyle=`hsl(200,25%,${50+Math.random()*20|0}%)`;
+      ctx.fillRect(col*60+10,10,44,30);
+    }
   }
-  const tex = new THREE.CanvasTexture(cv);
-  return tex;
+  return new THREE.CanvasTexture(cv);
 }
 
 const matCache = {};
 function getBuildingMats(type, baseColor) {
-  const key = type + '_' + baseColor;
+  const key = type+'_'+baseColor;
   if (matCache[key]) return matCache[key];
   const tex = makeFacadeTex(type);
-  const roofColor = type==='office' ? 0x1a2530 : type==='residential' ? 0x888070 : 0x607080;
+  const roofColor = type==='office' ? 0x909aa0 : type==='residential' ? 0xa8a090 : 0x989890;
   const mats = [
-    new THREE.MeshLambertMaterial({ map: tex, color: baseColor }),
-    new THREE.MeshLambertMaterial({ map: tex, color: baseColor }),
-    new THREE.MeshLambertMaterial({ color: roofColor }),
-    new THREE.MeshLambertMaterial({ color: 0x111111 }),
-    new THREE.MeshLambertMaterial({ map: tex, color: baseColor }),
-    new THREE.MeshLambertMaterial({ map: tex, color: baseColor }),
+    new THREE.MeshLambertMaterial({ map:tex, color:baseColor }),
+    new THREE.MeshLambertMaterial({ map:tex, color:baseColor }),
+    new THREE.MeshLambertMaterial({ color:roofColor }),
+    new THREE.MeshLambertMaterial({ color:0x444444 }),
+    new THREE.MeshLambertMaterial({ map:tex, color:baseColor }),
+    new THREE.MeshLambertMaterial({ map:tex, color:baseColor }),
   ];
   matCache[key] = mats;
   return mats;
 }
 
-// ===== ビルオブジェクト管理 =====
+// ===== グループ =====
 const buildingGroup = new THREE.Group();
 world.add(buildingGroup);
 const roadGroup = new THREE.Group();
 world.add(roadGroup);
 const waterGroup = new THREE.Group();
 world.add(waterGroup);
+const landuseGroup = new THREE.Group();
+world.add(landuseGroup);
+
+// ===== landuse色マップ =====
+const LANDUSE_COLORS = {
+  residential:  0xd4c8aa,
+  commercial:   0xc8bba0,
+  retail:       0xc8bba0,
+  industrial:   0xb0b0a8,
+  farmland:     0xb8c890,
+  grass:        0x88b860,
+  park:         0x70a850,
+  forest:       0x507840,
+  meadow:       0x90c068,
+  cemetery:     0x90a878,
+  parking:      0xa0a09a,
+  construction: 0xc8aa80,
+};
 
 // ===== フォールバック用ランダム建物 =====
 function buildFallbackCity(originLat, originLng) {
@@ -450,7 +498,11 @@ function buildFallbackCity(originLat, originLng) {
         if (r<0.3){type='office';w=rand(20,45);d=rand(20,45);h=rand(30,120);}
         else if (r<0.72){type='residential';w=rand(15,35);d=rand(15,35);h=rand(10,50);}
         else{type='low';w=rand(18,50);d=rand(18,50);h=rand(4,15);}
-        const baseColors={office:[0x1e3248,0x2a3f52],residential:[0xc8b89a,0xd4c4a8],low:[0x7a8fa0,0x8fa0b0]};
+        const baseColors={
+          office:[0xc8d0d8,0xb8c4cc,0xd0d8e0],
+          residential:[0xd8cfc0,0xe0d8c8,0xccc4b0],
+          low:[0xc0c8c0,0xb8c0b8,0xd0d0c8],
+        };
         const pal=baseColors[type];
         const bc=pal[Math.floor(Math.random()*pal.length)];
         const cx=bx+rand(-30,30), cz=bz+rand(-30,30);
@@ -473,13 +525,14 @@ async function fetchBuildings(lat, lng) {
   const query = `[out:json][timeout:25];
 (
   way["building"](around:${FETCH_RADIUS},${lat},${lng});
+  way["landuse"](around:${FETCH_RADIUS},${lat},${lng});
+  way["leisure"="park"](around:${FETCH_RADIUS},${lat},${lng});
+  way["natural"="water"](around:${FETCH_RADIUS},${lat},${lng});
   way["landuse"="water"](around:${FETCH_RADIUS},${lat},${lng});
   way["waterway"](around:${FETCH_RADIUS},${lat},${lng});
   way["highway"](around:${FETCH_RADIUS},${lat},${lng});
 );
-out body;
->;
-out skel qt;`;
+out body;>;out skel qt;`;
 
   const HOSTS = [
     'https://overpass-api.de/api/interpreter',
@@ -518,17 +571,25 @@ out skel qt;`;
 
   clearBuildings();
 
+  // landuse・公園・水面（先に敷く）
   for (const el of data.elements) {
     if (el.type !== 'way' || !el.nodes) continue;
     const tags = el.tags || {};
-
-    if (tags.building) {
-      buildOsmBuilding(el, nodes, lat, lng, tags);
-    } else if (tags.landuse === 'water' || tags.waterway) {
-      buildOsmWater(el, nodes, lat, lng);
-    } else if (tags.highway) {
-      buildOsmRoad(el, nodes, lat, lng, tags.highway);
-    }
+    if (tags.landuse && tags.landuse !== 'water') buildOsmLanduse(el, nodes, lat, lng, tags);
+    else if (tags.leisure === 'park') buildOsmLanduse(el, nodes, lat, lng, {landuse:'park'});
+    else if (tags['natural']==='water' || tags.landuse==='water' || tags.waterway) buildOsmWater(el, nodes, lat, lng);
+  }
+  // 道路
+  for (const el of data.elements) {
+    if (el.type !== 'way' || !el.nodes) continue;
+    const tags = el.tags || {};
+    if (tags.highway) buildOsmRoad(el, nodes, lat, lng, tags.highway);
+  }
+  // 建物（最前面）
+  for (const el of data.elements) {
+    if (el.type !== 'way' || !el.nodes) continue;
+    const tags = el.tags || {};
+    if (tags.building) buildOsmBuilding(el, nodes, lat, lng, tags);
   }
 
   S.lastFetchLat = lat;
@@ -538,7 +599,28 @@ out skel qt;`;
   document.getElementById('data-dot').className = 's-dot';
 }
 
-// ===== OSM建物をThree.jsに変換 =====
+// ===== OSM landuse =====
+function buildOsmLanduse(way, nodes, originLat, originLng, tags) {
+  const pts=[];
+  for (const nid of way.nodes) {
+    const n=nodes[nid];if(!n)continue;
+    const p=latLngToXZ(n.lat,n.lng,originLat,originLng);
+    pts.push(new THREE.Vector2(p.x,p.z));
+  }
+  if(pts.length<3)return;
+  const lu=tags.landuse||'residential';
+  const color=LANDUSE_COLORS[lu]||0xb8b8a8;
+  try{
+    const shape=new THREE.Shape(pts);
+    const geo=new THREE.ShapeGeometry(shape);
+    geo.rotateX(-Math.PI/2);
+    const mesh=new THREE.Mesh(geo,new THREE.MeshLambertMaterial({color}));
+    mesh.position.y=0.02;
+    landuseGroup.add(mesh);
+  }catch(e){}
+}
+
+// ===== OSM建物 =====
 function buildOsmBuilding(way, nodes, originLat, originLng, tags) {
   const pts = [];
   for (const nid of way.nodes) {
@@ -570,9 +652,9 @@ function buildOsmBuilding(way, nodes, originLat, originLng, tags) {
   else if (['industrial','warehouse','factory'].includes(bt)) type = 'low';
 
   const baseColors = {
-    office: [0x1e3248, 0x2a3f52, 0x304050],
-    residential: [0xc8b89a, 0xd4c4a8, 0xbfb090],
-    low: [0x7a8fa0, 0x8fa0b0, 0x607080],
+    office:      [0xc8d0d8, 0xb8c8d4, 0xd0d8e0, 0xc0ccd8],
+    residential: [0xd8cfc0, 0xe0d8c8, 0xccc4b0, 0xd4ccb8],
+    low:         [0xc8c8c0, 0xb8c0b8, 0xd0ccc0, 0xc0c8c0],
   };
   const pal = baseColors[type];
   const bc = pal[Math.floor(Math.random() * pal.length)];
@@ -594,7 +676,7 @@ function buildOsmBuilding(way, nodes, originLat, originLng, tags) {
     const rimShape = new THREE.Shape(pts);
     const rimGeo = new THREE.ExtrudeGeometry(rimShape, { depth: 0.8, bevelEnabled: false });
     rimGeo.rotateX(-Math.PI / 2);
-    const rimMat = new THREE.MeshLambertMaterial({ color: type==='office' ? 0x1a2530 : 0x888070 });
+    const rimMat = new THREE.MeshLambertMaterial({ color: type==='office' ? 0x9aa0a8 : 0xa09888 });
     const rim = new THREE.Mesh(rimGeo, rimMat);
     rim.position.y = h;
     buildingGroup.add(rim);
@@ -652,21 +734,13 @@ function buildOsmRoad(way, nodes, originLat, originLng, highway) {
 
 // ===== 建物クリア =====
 function clearBuildings() {
-  while (buildingGroup.children.length) {
-    const m = buildingGroup.children[0];
-    if (m.geometry) m.geometry.dispose();
-    buildingGroup.remove(m);
-  }
-  while (roadGroup.children.length) {
-    const m = roadGroup.children[0];
-    if (m.geometry) m.geometry.dispose();
-    roadGroup.remove(m);
-  }
-  while (waterGroup.children.length) {
-    const m = waterGroup.children[0];
-    if (m.geometry) m.geometry.dispose();
-    waterGroup.remove(m);
-  }
+  [buildingGroup, roadGroup, waterGroup, landuseGroup].forEach(g => {
+    while (g.children.length) {
+      const m = g.children[0];
+      if (m.geometry) m.geometry.dispose();
+      g.remove(m);
+    }
+  });
 }
 
 // ===== 移動時の差分更新チェック =====
