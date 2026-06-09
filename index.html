@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ドローン飛行</title>
-<script>const APP_VERSION = '6.1.1';</script>
+<script>const APP_VERSION = '7.0.0';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
@@ -325,7 +325,7 @@ const S = {
 
 // ===== Three.js セットアップ =====
 const canvas = document.getElementById('canvas');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias:false });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = false;
@@ -343,45 +343,215 @@ const sun = new THREE.DirectionalLight(0xfff8e8, 1.1);
 sun.position.set(400, 900, 300);
 scene.add(sun);
 
-// ===== 地面 =====
+// ===== 地面テクスチャ（Canvas生成） =====
+function makeGroundTexture() {
+  const sz = 512;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = sz;
+  const ctx = cv.getContext('2d');
+  // ベース：草地
+  ctx.fillStyle = '#4a7c3f';
+  ctx.fillRect(0, 0, sz, sz);
+  // 区画ごとに色を変える（住宅地・公園・駐車場）
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 4; c++) {
+      const x = c * 128, y = r * 128;
+      const t = Math.random();
+      if (t < 0.3) {
+        // 舗装地
+        ctx.fillStyle = `hsl(0,0%,${38 + Math.random()*10}%)`;
+        ctx.fillRect(x+4, y+4, 120, 120);
+      } else if (t < 0.55) {
+        // 公園
+        ctx.fillStyle = `hsl(${110+Math.random()*20},${50+Math.random()*20}%,${32+Math.random()*8}%)`;
+        ctx.fillRect(x+4, y+4, 120, 120);
+      }
+      // それ以外はベースの草地のまま
+    }
+  }
+  // 道路線
+  ctx.fillStyle = '#3a3a3a';
+  ctx.fillRect(0, 120, sz, 16);
+  ctx.fillRect(0, 248, sz, 16);
+  ctx.fillRect(0, 376, sz, 16);
+  ctx.fillRect(120, 0, 16, sz);
+  ctx.fillRect(248, 0, 16, sz);
+  ctx.fillRect(376, 0, 16, sz);
+  // 車線中央線
+  ctx.strokeStyle = '#ffdd00';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([16, 16]);
+  ctx.beginPath(); ctx.moveTo(0, 128); ctx.lineTo(sz, 128); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, 256); ctx.lineTo(sz, 256); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, 384); ctx.lineTo(sz, 384); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(128, 0); ctx.lineTo(128, sz); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(256, 0); ctx.lineTo(256, sz); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(384, 0); ctx.lineTo(384, sz); ctx.stroke();
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(40, 40);
+  return tex;
+}
+
 const groundGeo = new THREE.PlaneGeometry(10000, 10000, 1, 1);
-const groundMat = new THREE.MeshLambertMaterial({ color:0x3d7a2a });
+const groundMat = new THREE.MeshLambertMaterial({ map: makeGroundTexture() });
 const ground = new THREE.Mesh(groundGeo, groundMat);
 ground.rotation.x = -Math.PI/2;
 ground.position.y = 0;
 scene.add(ground);
 
-// ===== 道路グリッド =====
-function createRoads() {
-  const mat = new THREE.MeshLambertMaterial({ color:0x505050 });
-  for (let i = -2500; i <= 2500; i += 100) {
-    const hm = new THREE.Mesh(new THREE.PlaneGeometry(5000, 9), mat);
-    hm.rotation.x = -Math.PI/2; hm.position.set(0, 0.08, i); scene.add(hm);
-    const vm = new THREE.Mesh(new THREE.PlaneGeometry(9, 5000), mat);
-    vm.rotation.x = -Math.PI/2; vm.position.set(i, 0.08, 0); scene.add(vm);
+// ===== 建物窓テクスチャ（Canvas生成） =====
+// タイプ別にテクスチャをキャッシュ
+const buildingTexCache = {};
+function makeBuildingTex(type) {
+  if (buildingTexCache[type]) return buildingTexCache[type];
+  const sz = 256;
+  const cv = document.createElement('canvas');
+  cv.width = sz; cv.height = sz;
+  const ctx = cv.getContext('2d');
+
+  if (type === 'office') {
+    // オフィスビル：濃いガラスカーテンウォール
+    ctx.fillStyle = '#1a2a3a';
+    ctx.fillRect(0, 0, sz, sz);
+    // 縦横の仕切り
+    ctx.fillStyle = '#0d1520';
+    for (let x = 0; x < sz; x += 32) ctx.fillRect(x, 0, 3, sz);
+    for (let y = 0; y < sz; y += 24) ctx.fillRect(0, y, sz, 3);
+    // 窓（ランダムに点灯）
+    for (let col = 0; col < 7; col++) {
+      for (let row = 0; row < 9; row++) {
+        const wx = col * 32 + 5, wy = row * 24 + 5;
+        const ww = 22, wh = 14;
+        const lit = Math.random();
+        if (lit < 0.55) {
+          // 点灯
+          const r = 200 + Math.random()*55, g = 220 + Math.random()*35, b = 180 + Math.random()*75;
+          ctx.fillStyle = `rgb(${r},${g},${b})`;
+        } else if (lit < 0.75) {
+          // 薄く点灯
+          ctx.fillStyle = '#aabbcc';
+        } else {
+          // 消灯
+          ctx.fillStyle = '#0e1c2b';
+        }
+        ctx.fillRect(wx, wy, ww, wh);
+      }
+    }
+  } else if (type === 'residential') {
+    // マンション：ベージュ壁＋小さい窓
+    const wallH = `hsl(${30+Math.random()*20},${15+Math.random()*15}%,${62+Math.random()*12}%)`;
+    ctx.fillStyle = wallH;
+    ctx.fillRect(0, 0, sz, sz);
+    // 横の帯（階層の区切り）
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    for (let y = 0; y < sz; y += 36) ctx.fillRect(0, y+32, sz, 4);
+    // 窓
+    for (let col = 0; col < 5; col++) {
+      for (let row = 0; row < 6; row++) {
+        const wx = col * 46 + 10, wy = row * 36 + 8;
+        const lit = Math.random();
+        ctx.fillStyle = lit < 0.4 ? '#ffe8a0' : lit < 0.6 ? '#b0c8e0' : '#445';
+        ctx.fillRect(wx, wy, 26, 20);
+        // サッシ
+        ctx.fillStyle = 'rgba(255,255,255,0.25)';
+        ctx.fillRect(wx+12, wy, 2, 20);
+        ctx.fillRect(wx, wy+10, 26, 2);
+      }
+    }
+  } else {
+    // 低層・商業：看板風、明るい壁
+    ctx.fillStyle = `hsl(${200+Math.random()*40},${20+Math.random()*20}%,${55+Math.random()*15}%)`;
+    ctx.fillRect(0, 0, sz, sz);
+    // 大きいショーウィンドウ風
+    ctx.fillStyle = 'rgba(180,220,255,0.55)';
+    ctx.fillRect(20, 40, sz-40, 80);
+    ctx.fillStyle = 'rgba(180,220,255,0.4)';
+    ctx.fillRect(20, 150, sz-40, 60);
+    // 縁
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([]);
+    ctx.strokeRect(20, 40, sz-40, 80);
+    ctx.strokeRect(20, 150, sz-40, 60);
   }
+
+  const tex = new THREE.CanvasTexture(cv);
+  buildingTexCache[type] = tex;
+  return tex;
 }
-createRoads();
 
 // ===== 建物生成 =====
 function createBuildings() {
-  const colors = [0x8899aa,0x667788,0x99aabb,0xaabbcc,0x778899,0xbbccdd,0x556677,0xccddee,0x445566];
-  const rand = (a,b)=>a+Math.random()*(b-a);
+  const rand = (a,b) => a + Math.random()*(b-a);
+  const baseColors = {
+    office:      [0x1e3248, 0x2a3f52, 0x243344, 0x1a2d40, 0x304050],
+    residential: [0xc8b89a, 0xd4c4a8, 0xbfb090, 0xc9bba0, 0xe0d0b8],
+    low:         [0x7a8fa0, 0x8fa0b0, 0x6e8292, 0x9aaabb, 0x607080],
+  };
+
   for (let bx = -2500; bx <= 2500; bx += 100) {
     for (let bz = -2500; bz <= 2500; bz += 100) {
       if (Math.random() < 0.55) {
-        const w = rand(18,50), d = rand(18,50), h = rand(8,130);
+        // 建物タイプを決める
+        const r = Math.random();
+        let type, h, w, d;
+        if (r < 0.3) {
+          type = 'office';
+          w = rand(22, 50); d = rand(22, 50); h = rand(40, 140);
+        } else if (r < 0.72) {
+          type = 'residential';
+          w = rand(18, 38); d = rand(18, 38); h = rand(12, 55);
+        } else {
+          type = 'low';
+          w = rand(20, 55); d = rand(20, 55); h = rand(4, 18);
+        }
+
+        const cx = bx + rand(-38, 38);
+        const cz = bz + rand(-38, 38);
+        const palette = baseColors[type];
+        const baseColor = palette[Math.floor(Math.random() * palette.length)];
+        const tex = makeBuildingTex(type);
+
+        // 側面マテリアル：テクスチャ面×4 + 屋上・底面はベタ色
+        const roofColor = type === 'office' ? 0x1a2530 : type === 'residential' ? 0x888070 : 0x607080;
+        const materials = [
+          new THREE.MeshLambertMaterial({ map: tex, color: baseColor }),   // +X
+          new THREE.MeshLambertMaterial({ map: tex, color: baseColor }),   // -X
+          new THREE.MeshLambertMaterial({ color: roofColor }),              // +Y 屋上
+          new THREE.MeshLambertMaterial({ color: 0x111111 }),               // -Y 底面
+          new THREE.MeshLambertMaterial({ map: tex, color: baseColor }),   // +Z
+          new THREE.MeshLambertMaterial({ map: tex, color: baseColor }),   // -Z
+        ];
+
         const geo = new THREE.BoxGeometry(w, h, d);
-        const mat = new THREE.MeshLambertMaterial({ color:colors[Math.floor(Math.random()*colors.length)] });
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.position.set(bx+rand(-40,40), h/2, bz+rand(-40,40));
+        const mesh = new THREE.Mesh(geo, materials);
+        mesh.position.set(cx, h/2, cz);
         scene.add(mesh);
-        // 屋上の縁
-        const rimGeo = new THREE.BoxGeometry(w+0.5, 1.5, d+0.5);
-        const rimMat = new THREE.MeshLambertMaterial({ color:0x99aabb });
+
+        // 屋上の縁（同じcx,czを使う）
+        const rimH = type === 'office' ? 2.0 : 1.0;
+        const rimGeo = new THREE.BoxGeometry(w + 0.6, rimH, d + 0.6);
+        const rimMat = new THREE.MeshLambertMaterial({ color: roofColor });
         const rim = new THREE.Mesh(rimGeo, rimMat);
-        rim.position.set(bx+rand(-40,40), h+0.75, bz+rand(-40,40));
+        rim.position.set(cx, h + rimH/2, cz);
         scene.add(rim);
+
+        // オフィスビルに屋上設備（給水塔・空調）
+        if (type === 'office' && h > 50) {
+          // 給水塔
+          const tankGeo = new THREE.CylinderGeometry(1.5, 1.5, 4, 8);
+          const tankMat = new THREE.MeshLambertMaterial({ color: 0x8899aa });
+          const tank = new THREE.Mesh(tankGeo, tankMat);
+          tank.position.set(cx + rand(-w/4, w/4), h + rimH + 2, cz + rand(-d/4, d/4));
+          scene.add(tank);
+          // アンテナ
+          const antGeo = new THREE.CylinderGeometry(0.15, 0.15, rand(4, 10), 4);
+          const antMat = new THREE.MeshLambertMaterial({ color: 0xcccccc });
+          const ant = new THREE.Mesh(antGeo, antMat);
+          ant.position.set(cx + rand(-w/3, w/3), h + rimH + rand(2, 5) + 3, cz + rand(-d/3, d/3));
+          scene.add(ant);
+        }
       }
     }
   }
