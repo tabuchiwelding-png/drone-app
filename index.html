@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ドローン飛行</title>
-<script>const APP_VERSION = '11.3.0';</script>
+<script>const APP_VERSION = '11.4.0';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
@@ -58,14 +58,18 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
 .spd-btn.active { background:rgba(0,255,180,0.15); border-color:var(--accent); color:var(--accent); }
 
 /* ===== 右：ツール列 ===== */
-#auto-btn { position:fixed; top:58px; right:66px; z-index:35; background:var(--panel); border:1px solid var(--border); color:var(--accent); font-family:var(--font); font-size:9px; padding:6px 10px; cursor:pointer; min-height:44px; }
+#auto-btn { position:fixed; top:206px; left:14px; z-index:35; width:78px; background:var(--panel); border:1px solid var(--border); color:var(--accent); font-family:var(--font); font-size:9px; padding:6px 10px; cursor:pointer; min-height:44px; }
 #auto-btn.active{background:rgba(0,255,180,0.2);border-color:var(--accent);}
-#side-tools { position:fixed; top:58px; right:14px; z-index:35; display:flex; flex-direction:column; gap:6px; }
+#side-tools { position:fixed; top:178px; right:14px; z-index:35; display:grid; grid-template-columns:44px 44px; gap:6px; justify-items:end; }
 .tool-btn { width:44px; height:44px; background:var(--panel); border:1px solid var(--border); color:var(--accent2); font-size:17px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
 .tool-btn.active { background:rgba(0,204,255,0.18); border-color:var(--accent2); }
 
 /* ===== ミニマップ ===== */
-#minimap { position:fixed; left:14px; top:222px; z-index:35; width:112px; height:112px; border:1px solid var(--border); background:rgba(2,10,8,0.85); display:block; }
+#minimap { position:fixed; right:14px; top:58px; z-index:35; width:112px; height:112px; border:1px solid var(--border); background:rgba(2,10,8,0.85); display:block; }
+#hud-info { position:fixed; left:14px; top:258px; z-index:30; pointer-events:none; background:rgba(2,12,9,0.66); border:1px solid var(--border); padding:7px 10px; font-size:10px; line-height:1.8; color:var(--text); max-width:178px; }
+#hud-info div { white-space:nowrap; }
+#hi-env { color:var(--accent2); }
+#vignette { position:fixed; inset:0; pointer-events:none; z-index:9; background:radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,0.45) 100%); }
 #minimap.hidden { display:none; }
 
 /* ===== インジケータ・トースト ===== */
@@ -180,6 +184,7 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
 
 <canvas id="canvas"></canvas>
 <div id="scanlines"></div>
+<div id="vignette"></div>
 <div id="crosshair">
   <div class="ch-c tl"></div><div class="ch-c tr"></div>
   <div class="ch-c bl"></div><div class="ch-c br"></div>
@@ -191,7 +196,12 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
   <div class="hud-b" style="align-items:center"><span class="hud-l">◈ ドローン飛行</span><span class="hud-v" style="font-size:11px" id="mode-display">手動</span></div>
   <div class="hud-b" style="align-items:flex-end"><span class="hud-l">速度</span><span class="hud-v" id="spd-display">0 km/h</span><span style="font-size:8px;color:var(--dim)" id="ver-display">v11</span></div>
 </div>
-<div id="compass"><span id="compass-dir">北</span><span id="coords-display">--</span><span id="env-display">--:--</span></div>
+<div id="compass"><span id="compass-dir">北</span></div>
+<div id="hud-info">
+  <div id="hi-coords">--</div>
+  <div id="hi-env">--:--</div>
+  <div id="hi-stat">--</div>
+</div>
 <div id="pitch-indicator">
   <span class="pitch-lbl">仰角</span>
   <div class="pitch-bar"><div class="pitch-fill" id="pitch-fill"></div></div>
@@ -214,6 +224,7 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
   <button class="tool-btn active" id="btn-map" onclick="toggleMap()">🗺</button>
   <button class="tool-btn active" id="btn-label" onclick="toggleLabels()">🏷</button>
   <button class="tool-btn active" id="btn-traf" onclick="toggleTraffic()">🚶</button>
+  <button class="tool-btn" id="btn-gyro" onclick="toggleGyro()">📱</button>
 </div>
 <canvas id="minimap" width="112" height="112"></canvas>
 
@@ -759,7 +770,7 @@ function hourDensity() {
   if (h >= 10 && h <= 16) return 0.65;
   if (h >= 20 && h <= 22) return 0.45;
   if (h === 5 || h === 6) return 0.25;
-  return 0.08;
+  return 0.15;
 }
 
 function spawnAgents(list, paths, n, spdMin, spdMax) {
@@ -781,8 +792,10 @@ function spawnAgents(list, paths, n, spdMin, spdMax) {
 
 function spawnTraffic() {
   const dens = trafficDensity();
-  pedMesh.count = spawnAgents(peds, TRAF_PATHS.ped, Math.round(TRAF_MAX_PED * dens), 0.9, 1.7);
-  carMesh.count = spawnAgents(cars, TRAF_PATHS.car, Math.round(TRAF_MAX_CAR * dens), 5.5, 12);
+  const nPed = TRAF_PATHS.ped.length ? Math.max(5, Math.round(TRAF_MAX_PED * dens)) : 0;
+  const nCar = TRAF_PATHS.car.length ? Math.max(4, Math.round(TRAF_MAX_CAR * dens)) : 0;
+  pedMesh.count = spawnAgents(peds, TRAF_PATHS.ped, nPed, 0.9, 1.7);
+  carMesh.count = spawnAgents(cars, TRAF_PATHS.car, nCar, 5.5, 12);
   pedMesh.instanceMatrix.needsUpdate = true;
   carMesh.instanceMatrix.needsUpdate = true;
 }
@@ -975,6 +988,7 @@ function buildTexCross(A, x, z, y0, y1, w, col) {
 // ===== 地面（航空写真＋実標高 or フォールバック） =====
 // ============================================================
 let groundMesh = null;
+let basePhotoCanvas = null, basePhotoX0 = 0, basePhotoY0 = 0; // z17下絵（詳細層用）
 async function buildGround(lat, lng, token) {
   // 中心タイルの周囲8×8（z17）≒ 同範囲を2倍解像度でカバー
   const ct = lngLatToTile(lng, lat, PHOTO_Z);
@@ -1004,6 +1018,8 @@ async function buildGround(lat, lng, token) {
   await Promise.all(jobs);
 
   photoMode = fails < 32; // 半分以上失敗ならフォールバック（海外等）
+  if (photoMode) { basePhotoCanvas = cv; basePhotoX0 = x0; basePhotoY0 = y0; }
+  else basePhotoCanvas = null;
 
   if (photoMode) {
     const pNW = latLngToXZ(nw.lat, nw.lng, ORIGIN.lat, ORIGIN.lng);
@@ -1064,7 +1080,15 @@ async function buildDetail(lat, lng, token) {
     const se = tileToLngLat(x0+8, y0+8, DETAIL_Z);
     const cv = document.createElement('canvas');
     cv.width = cv.height = 2048;
-    const ctx = cv.getContext('2d');  // 欠けタイルは透明のまま＝下のz17層が透ける
+    const ctx = cv.getContext('2d');
+    // z17の同領域を下絵として拡大描画（z18欠けタイルでも穴が開かない）
+    if (basePhotoCanvas) {
+      const sx = (x0/2 - basePhotoX0) * 256;
+      const sy = (y0/2 - basePhotoY0) * 256;
+      ctx.drawImage(basePhotoCanvas, sx, sy, 1024, 1024, 0, 0, 2048, 2048);
+    } else {
+      ctx.fillStyle = '#5a6a50'; ctx.fillRect(0, 0, 2048, 2048);
+    }
     let ok = 0;
     const jobs = [];
     for (let dx=0; dx<8; dx++) for (let dy=0; dy<8; dy++) {
@@ -1089,7 +1113,7 @@ async function buildDetail(lat, lng, token) {
     const tex = new THREE.CanvasTexture(cv);
     tex.encoding = THREE.sRGBEncoding;
     tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-    const mat = new THREE.MeshLambertMaterial({ map:tex, transparent:true, color: S.night ? 0x8088b8 : 0xffffff });
+    const mat = new THREE.MeshLambertMaterial({ map:tex, color: S.night ? 0x8088b8 : 0xffffff });
     const geo = new THREE.PlaneGeometry(w, d, 64, 64);
     geo.rotateX(-Math.PI/2);
     const mesh = new THREE.Mesh(geo, mat);
@@ -1748,9 +1772,9 @@ function applyNight(on) {
   flatMat.color.setHex(S.night ? 0x9098c0 : 0xffffff);
   waterMat.color.setHex(S.night ? 0x1c3a55 : 0x3f88b4);
   leafMat.color.setHex(S.night ? 0x70789a : 0xffffff);
-  carMat.color.setHex(S.night ? 0x2a3142 : 0x14171d);
+  carMat.color.setHex(S.night ? 0x3d4660 : 0x14171d);
   carMat.emissive.setHex(S.night ? 0x141a26 : 0x000000);
-  personMat.color.setHex(S.night ? 0x2e3340 : 0x07090d);
+  personMat.color.setHex(S.night ? 0x5a6480 : 0x07090d);
 
   saveSettings();
 }
@@ -1776,6 +1800,45 @@ function toggleLabels() {
   trafGroup.visible = S.trafficOn;
   saveSettings();
 }
+// ===== ジャイロ視点（端末の傾き・向きで見回す） =====
+const gyro = { on:false, calib:false, a0:0, b0:0, h0:0, p0:0 };
+function toggleGyro() {
+  if (!gyro.on) {
+    const start = function() {
+      gyro.on = true;
+      gyro.calib = true; // 次のイベントで現姿勢を基準化
+      document.getElementById('btn-gyro').classList.add('active');
+      showToast('📱 ジャイロ視点 ON：端末を動かして見回す');
+    };
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      DeviceOrientationEvent.requestPermission()
+        .then(function(s){ if (s === 'granted') start(); else showToast('ジャイロの許可が必要です'); })
+        .catch(function(){ showToast('ジャイロを利用できません'); });
+    } else {
+      start();
+    }
+  } else {
+    gyro.on = false;
+    document.getElementById('btn-gyro').classList.remove('active');
+    showToast('📱 ジャイロ視点 OFF');
+  }
+}
+window.addEventListener('deviceorientation', function(e) {
+  if (!gyro.on || e.beta === null) return;
+  // iOSは絶対方位webkitCompassHeading（時計回り）、他はalpha（反時計回り）
+  const a = (typeof e.webkitCompassHeading === 'number') ? -e.webkitCompassHeading : (e.alpha || 0);
+  if (gyro.calib) {
+    gyro.calib = false;
+    gyro.a0 = a; gyro.b0 = e.beta;
+    gyro.h0 = S.heading; gyro.p0 = S.camPitch;
+  }
+  let dA = a - gyro.a0;
+  if (dA > 180) dA -= 360; else if (dA < -180) dA += 360;
+  S.heading = ((gyro.h0 - dA) % 360 + 360) % 360;
+  S.camPitch = Math.max(CAM_PITCH_MIN, Math.min(CAM_PITCH_MAX, gyro.p0 + (e.beta - gyro.b0)));
+});
+
 function toggleTraffic() {
   S.trafficOn = !S.trafficOn;
   trafGroup.visible = S.trafficOn;
@@ -1881,9 +1944,6 @@ function updateHUD() {
   document.getElementById('spd-display').textContent = Math.round(S.speed * 3.6) + ' km/h';
   let h = ((S.heading % 360) + 360) % 360;
   document.getElementById('compass-dir').textContent = DIRS[Math.round(h / 45) % 8];
-  document.getElementById('coords-display').textContent =
-    Math.abs(S.lat).toFixed(4) + '°' + (S.lat >= 0 ? 'N' : 'S') + ' ' +
-    Math.abs(S.lng).toFixed(4) + '°' + (S.lng >= 0 ? 'E' : 'W');
   const f = document.getElementById('pitch-fill');
   const p = Math.max(-45, Math.min(45, S.camPitch));
   const hpx = Math.abs(p) / 45 * 30;
@@ -1934,8 +1994,14 @@ function updateEnv() {
   const d = new Date();
   const t = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
   const w = weatherIcon(envWeatherCode);
-  document.getElementById('env-display').textContent =
-    (envTemp === null ? t : t + '  ' + envTemp.toFixed(1) + '°C') + (w ? ' ' + w : '');
+  document.getElementById('hi-coords').textContent =
+    Math.abs(S.lat).toFixed(4) + '°' + (S.lat >= 0 ? 'N' : 'S') + ' ' +
+    Math.abs(S.lng).toFixed(4) + '°' + (S.lng >= 0 ? 'E' : 'W');
+  document.getElementById('hi-env').textContent =
+    t + (envTemp === null ? '' : '  ' + envTemp.toFixed(1) + '°C') + (w ? ' ' + w : '');
+  document.getElementById('hi-stat').textContent =
+    '👥' + Math.round(trafficDensity()*100) + '%　👮' + infoStats.police.length +
+    '　🚗' + infoStats.jams.length + '　📷' + infoStats.cams;
 }
 
 // ============================================================
@@ -1947,8 +2013,10 @@ function updateEnv() {
 const WAZE_PROXIES = [
   function(u){ return 'https://corsproxy.io/?url=' + encodeURIComponent(u); },
   function(u){ return 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u); },
+  function(u){ return 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u); },
 ];
-let wazeData = { alerts: [], jams: [], ok: false };
+let wazeData = { alerts: [], jams: [], ok: false, via: -1 };
+let wazeTried = false;
 async function fetchWaze(lat, lng) {
   const d = 0.013;
   const url = 'https://www.waze.com/live-map/api/georss?top=' + (lat+d).toFixed(5) +
@@ -1962,12 +2030,14 @@ async function fetchWaze(lat, lng) {
       clearTimeout(tm);
       if (!res.ok) continue;
       const js = await res.json();
-      if (js && (js.alerts || js.jams)) {
-        wazeData = { alerts: js.alerts || [], jams: js.jams || [], ok: true };
+      if (js && typeof js === 'object' && !js.error) {
+        // 周辺0件だとalerts/jamsキー自体が無い＝それでも取得成功
+        wazeData = { alerts: js.alerts || [], jams: js.jams || [], ok: true, via: i };
         return true;
       }
     } catch (e) {}
   }
+  wazeTried = true;
   return false;
 }
 function clearWazeLayer() {
@@ -2016,6 +2086,7 @@ function buildWazeLayer(token) {
   const jm = finishAcc(A, flatMat, infoGroup);
   if (jm) jm.userData.waze = true;
   renderInfo();
+  updateEnv();
 }
 
 // ===== 情報タブ =====
@@ -2034,9 +2105,11 @@ function renderInfo() {
   row('👥', '推定人出', Math.round(trafficDensity()*100) + '%（実時刻・天気連動）');
   row('📷', 'オービス', infoStats.cams + '箇所');
   row('🚧', '工事区間', infoStats.works + '件');
-  row('👮', '取締情報', wazeData.ok ? infoStats.police.length + '件' : '取得待ち');
-  row('💥', '事故', wazeData.ok ? infoStats.accidents.length + '件' : '取得待ち');
-  row('🚗', '渋滞', wazeData.ok ? infoStats.jams.length + '区間' : '取得待ち');
+  const wzSt = wazeData.ok ? ('接続OK（経路' + 'ABC'.charAt(wazeData.via) + '）') : (wazeTried ? '全経路接続不可' : '取得待ち');
+  row('📡', 'Waze接続', wzSt);
+  row('👮', '取締情報', wazeData.ok ? infoStats.police.length + '件' : '--');
+  row('💥', '事故', wazeData.ok ? infoStats.accidents.length + '件' : '--');
+  row('🚗', '渋滞', wazeData.ok ? infoStats.jams.length + '区間' : '--');
   for (let i = 0; i < Math.min(3, infoStats.jams.length); i++) {
     const j = infoStats.jams[i];
     row('　└', j.street || '（道路名なし）', j.spd + ' km/h');
@@ -2252,7 +2325,7 @@ function mainLoop() {
   frame++;
 
   // カメラ操作
-  if (S.camActive) {
+  if (S.camActive && !gyro.on) {
     S.heading += S.camDx * 100 * dt;
     S.camPitch -= S.camDy * 70 * dt;
     S.camPitch = Math.max(-80, Math.min(80, S.camPitch));
