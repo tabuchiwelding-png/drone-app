@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ドローン飛行</title>
-<script>const APP_VERSION = '11.2.0';</script>
+<script>const APP_VERSION = '11.3.0';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
@@ -131,6 +131,10 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
 .log-time{font-size:9px;color:var(--dim);}
 .log-fly-btn{background:none;border:1px solid var(--border);color:var(--accent);font-family:var(--font);font-size:9px;padding:6px 12px;cursor:pointer;min-height:44px;}
 .log-empty{text-align:center;color:var(--dim);font-size:11px;padding:30px;}
+.info-item{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid rgba(0,255,180,0.07);}
+.info-t{font-size:11px;color:var(--text);}
+.info-v{font-size:11px;color:var(--accent);}
+.info-src{font-size:8px;color:var(--dim);padding:12px 16px;line-height:1.7;}
 
 /* ===== ローディング・ガイド ===== */
 #loading{position:fixed;inset:0;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:200;gap:16px;}
@@ -273,6 +277,13 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
   <button class="fly-start-btn" onclick="startFlight()">◈ 飛行開始</button>
 </div>
 
+<!-- ===== 情報パネル ===== -->
+<div class="panel" id="panel-info">
+  <div class="panel-title">◈ 周辺リアルタイム情報</div>
+  <div id="info-list"></div>
+  <div class="info-src">出典: OpenStreetMap / 国土地理院 / Open-Meteo / Waze（非公式・取得不可時は非表示）<br>人・車の個体はシミュレーション。位置（道路・施設）と件数・密度は実データ。</div>
+</div>
+
 <!-- ===== ログパネル ===== -->
 <div class="panel" id="panel-log">
   <div class="panel-title">◈ 飛行記録</div>
@@ -288,6 +299,7 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
 <div id="tabbar">
   <button class="tab-btn active" id="tab-fly" onclick="switchTab('fly')"><span class="tab-icon">🚁</span>飛行</button>
   <button class="tab-btn" id="tab-depart" onclick="switchTab('depart')"><span class="tab-icon">📍</span>出発地</button>
+  <button class="tab-btn" id="tab-info" onclick="switchTab('info')"><span class="tab-icon">📡</span>情報</button>
   <button class="tab-btn" id="tab-log" onclick="switchTab('log')"><span class="tab-icon">📋</span>記録</button>
 </div>
 
@@ -307,6 +319,8 @@ const REFETCH_DIST = 400;     // 再取得トリガー距離(m)
 const M_LAT = 111320;         // 1度あたりメートル(緯度)
 const PHOTO_Z = 17;           // 航空写真タイルズーム（z17×8×8=2048px）
 const DEM_Z = 14;             // 標高タイルズーム
+const DETAIL_Z = 18;          // 詳細地面ズーム（約46cm/px・国土地理院提供の最大）
+const DETAIL_REFRESH = 240;   // 詳細層の追従更新距離(m)
 const MAX_BUILDINGS = 1200;
 const MAX_TREES = 160;
 const MAX_SIGNALS = 90;
@@ -666,6 +680,8 @@ const waterGroup   = new THREE.Group(); world.add(waterGroup);
 const buildGroup   = new THREE.Group(); world.add(buildGroup);
 const treeGroup    = new THREE.Group(); world.add(treeGroup);
 const labelGroup   = new THREE.Group(); world.add(labelGroup);
+const infoGroup    = new THREE.Group(); world.add(infoGroup);  // オービス・工事・Wazeマーカー
+const infoStats = { cams: 0, works: 0, police: [], accidents: [], jams: [] };
 
 const basePlane = new THREE.Mesh(
   new THREE.PlaneGeometry(12000, 12000),
@@ -834,7 +850,7 @@ function disposeGroup(g) {
   }
 }
 function clearWorld() {
-  [groundGroup, flatGroup, waterGroup, buildGroup, treeGroup, labelGroup].forEach(disposeGroup);
+  [groundGroup, flatGroup, waterGroup, buildGroup, treeGroup, labelGroup, infoGroup].forEach(disposeGroup);
 }
 
 // ============================================================
@@ -866,7 +882,9 @@ function finishAcc(A, mat, group) {
   g.setAttribute('normal',   new THREE.Float32BufferAttribute(A.n, 3));
   g.setAttribute('uv',       new THREE.Float32BufferAttribute(A.u, 2));
   g.setAttribute('color',    new THREE.Float32BufferAttribute(A.c, 3));
-  group.add(new THREE.Mesh(g, mat));
+  const mesh = new THREE.Mesh(g, mat);
+  group.add(mesh);
+  return mesh;
 }
 
 // ===== ポリゴン塗りつぶし（屋根・水面・landuse共通／南北反転なし） =====
@@ -1032,6 +1050,69 @@ async function buildGround(lat, lng, token) {
   }
 }
 
+// ===== 詳細地面層（z18・ドローン直下約940mを2倍解像度で重ねる2層LOD） =====
+let detailMesh = null;
+let detailCenter = null;
+let detailBusy = false;
+async function buildDetail(lat, lng, token) {
+  if (detailBusy) return;
+  detailBusy = true;
+  try {
+    const ct = lngLatToTile(lng, lat, DETAIL_Z);
+    const x0 = Math.floor(ct.x)-3, y0 = Math.floor(ct.y)-3;
+    const nw = tileToLngLat(x0, y0, DETAIL_Z);
+    const se = tileToLngLat(x0+8, y0+8, DETAIL_Z);
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 2048;
+    const ctx = cv.getContext('2d');  // 欠けタイルは透明のまま＝下のz17層が透ける
+    let ok = 0;
+    const jobs = [];
+    for (let dx=0; dx<8; dx++) for (let dy=0; dy<8; dy++) {
+      jobs.push((async()=>{
+        const im = await getTileImg('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/' + DETAIL_Z + '/' + (x0+dx) + '/' + (y0+dy) + '.jpg');
+        if (im) { ctx.drawImage(im, dx*256, dy*256, 256, 256); ok++; }
+      })());
+    }
+    await Promise.all(jobs);
+    if (token !== buildToken || !photoMode) return;
+    if (ok < 16) return; // z18未提供地域は詳細層なし（z17で継続）
+    if (detailMesh) {
+      groundGroup.remove(detailMesh);
+      detailMesh.geometry.dispose();
+      if (detailMesh.material.map) detailMesh.material.map.dispose();
+      detailMesh.material.dispose();
+      detailMesh = null;
+    }
+    const pNW = latLngToXZ(nw.lat, nw.lng, ORIGIN.lat, ORIGIN.lng);
+    const pSE = latLngToXZ(se.lat, se.lng, ORIGIN.lat, ORIGIN.lng);
+    const w = pSE.x - pNW.x, d = pSE.z - pNW.z;
+    const tex = new THREE.CanvasTexture(cv);
+    tex.encoding = THREE.sRGBEncoding;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    const mat = new THREE.MeshLambertMaterial({ map:tex, transparent:true, color: S.night ? 0x8088b8 : 0xffffff });
+    const geo = new THREE.PlaneGeometry(w, d, 64, 64);
+    geo.rotateX(-Math.PI/2);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(pNW.x + w/2, 0, pNW.z + d/2);
+    mesh.userData.ownTex = true;
+    mesh.userData.ownMat = true;
+    const pos = geo.getAttribute('position');
+    for (let i=0; i<pos.count; i++) {
+      pos.setY(i, groundYWorld(pos.getX(i)+mesh.position.x, pos.getZ(i)+mesh.position.z) + 0.07);
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    detailMesh = mesh;
+    detailCenter = { lat: lat, lng: lng };
+    groundGroup.add(mesh);
+  } catch(e) {} finally { detailBusy = false; }
+}
+function checkDetailRefresh() {
+  if (S.isFetching || detailBusy || !photoMode || !detailCenter) return;
+  const p = latLngToXZ(S.lat, S.lng, detailCenter.lat, detailCenter.lng);
+  if (Math.hypot(p.x, p.z) > DETAIL_REFRESH) buildDetail(S.lat, S.lng, buildToken);
+}
+
 // ============================================================
 // ===== Overpass取得（2ホストフォールバック・タイムアウト） =====
 // ============================================================
@@ -1047,6 +1128,8 @@ async function fetchOverpass(lat, lng) {
     'node["highway"="traffic_signals"](around:' + FETCH_RADIUS + ',' + lat + ',' + lng + ');' +
     'node["natural"="tree"](around:' + FETCH_RADIUS + ',' + lat + ',' + lng + ');' +
     'node["railway"="station"](around:' + FETCH_RADIUS + ',' + lat + ',' + lng + ');' +
+    'node["highway"="speed_camera"](around:' + FETCH_RADIUS + ',' + lat + ',' + lng + ');' +
+    'way["highway"="construction"](around:' + FETCH_RADIUS + ',' + lat + ',' + lng + ');' +
     ');out body;>;out skel qt;';
   const HOSTS = [
     'https://overpass-api.de/api/interpreter',
@@ -1123,12 +1206,13 @@ async function buildScene(data, token) {
 
   // ---- 分類 ----
   const buildings=[], roads=[], rails=[], waterLines=[], waterPolys=[], landuses=[], greens=[];
-  const signals=[], treePts=[], labelCands=[];
+  const signals=[], treePts=[], labelCands=[], cams=[], works=[];
   for (let i=0; i<data.elements.length; i++) {
     const el = data.elements[i];
     if (el.type === 'way' && el.nodes) {
       const t = el.tags || {};
       if (t.building) buildings.push(el);
+      else if (t.highway === 'construction' || (t.construction && t.highway)) works.push(el);
       else if (t.highway) roads.push(el);
       else if (t.railway) rails.push(el);
       else if (t.waterway) waterLines.push(el);
@@ -1138,6 +1222,7 @@ async function buildScene(data, token) {
     } else if (el.type === 'node' && el.tags) {
       const t = el.tags;
       if (t.highway === 'traffic_signals') signals.push(el);
+      else if (t.highway === 'speed_camera') cams.push(el);
       else if (t.natural === 'tree') treePts.push(el);
       else if (t.railway === 'station' && t.name) labelCands.push({name:t.name, node:el, prio:1});
     }
@@ -1371,6 +1456,27 @@ async function buildScene(data, token) {
     buildTexCross(A.sig, p.x, p.z, gy+4.2, gy+4.78, 1.55, [1,1,1]);
     sigCount++;
   }
+
+  // ---- オービス（OSM speed_camera）・工事区間（OSM construction） ----
+  infoStats.cams = 0; infoStats.works = 0;
+  for (let k=0; k<cams.length; k++) {
+    const n = cams[k];
+    const p = latLngToXZ(n.lat, n.lon, ORIGIN.lat, ORIGIN.lng);
+    const gy = groundYWorld(p.x, p.z);
+    buildCross(A.flat, p.x, p.z, gy, gy+5.5, 0.25, [0.5,0.52,0.55]);
+    addMarkerTo(infoGroup, '📷', 'オービス', p.x, gy+13, p.z);
+    infoStats.cams++;
+  }
+  for (let k=0; k<works.length; k++) {
+    const w = works[k];
+    const wpts = toPts(w);
+    if (wpts.length < 2) continue;
+    buildStrip(A.flat, wpts, 5, [0.95,0.55,0.1], 0.45);
+    const mid = wpts[(wpts.length/2)|0];
+    const gy = groundYWorld(mid.x, mid.z);
+    addMarkerTo(infoGroup, '🚧', '工事中', mid.x, gy+12, mid.z);
+    infoStats.works++;
+  }
   await tick(); if (token !== buildToken) return;
 
   // ---- 統合メッシュ確定（描画コールを最小化） ----
@@ -1444,6 +1550,39 @@ function addLabel(text, x, y, z) {
   labelGroup.add(sp);
 }
 
+// ===== 情報マーカー（絵文字＋ラベル一体型スプライト） =====
+function addMarkerTo(group, emoji, text, x, y, z) {
+  const cv = document.createElement('canvas');
+  cv.width = 96; cv.height = 124;
+  const c = cv.getContext('2d');
+  c.fillStyle = 'rgba(8,18,14,0.9)';
+  c.beginPath(); c.arc(48, 38, 32, 0, Math.PI*2); c.fill();
+  c.strokeStyle = 'rgba(255,180,60,0.85)';
+  c.lineWidth = 3;
+  c.beginPath(); c.arc(48, 38, 32, 0, Math.PI*2); c.stroke();
+  c.font = '36px sans-serif';
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText(emoji, 48, 40);
+  if (text) {
+    c.font = '19px sans-serif';
+    const tw = Math.min(92, c.measureText(text).width + 12);
+    c.fillStyle = 'rgba(8,18,14,0.88)';
+    c.fillRect(48 - tw/2, 92, tw, 26);
+    c.fillStyle = '#ffe9c0';
+    c.fillText(text, 48, 105);
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.encoding = THREE.sRGBEncoding;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  const sp = new THREE.Sprite(mat);
+  sp.position.set(x, y, z);
+  sp.scale.set(96/7.5, 124/7.5, 1);
+  sp.userData.ownTex = true;
+  sp.userData.ownMat = true;
+  group.add(sp);
+  return sp;
+}
+
 // ============================================================
 // ===== フォールバック都市（全API失敗時） =====
 // ============================================================
@@ -1495,7 +1634,11 @@ async function fetchWorld(lat, lng) {
   clearWorld();
   pedMesh.count = 0; carMesh.count = 0;
   TRAF_PATHS.ped.length = 0; TRAF_PATHS.car.length = 0;
+  wazeData = { alerts: [], jams: [], ok: false };
+  infoStats.police.length = 0; infoStats.accidents.length = 0; infoStats.jams.length = 0;
+  infoStats.cams = 0; infoStats.works = 0;
   groundMesh = null;
+  detailMesh = null; detailCenter = null;
   MM.roads.length = 0; MM.waters.length = 0; MM.blds.length = 0;
 
   // ドローン現在地基準でworldを再同期
@@ -1528,6 +1671,8 @@ async function fetchWorld(lat, lng) {
   S.droneGroundY = groundY(S.lat, S.lng);
   S.alt = S.droneGroundY + prevRel;
 
+  if (photoMode) buildDetail(lat, lng, token); // z18詳細層は並行構築（待たない）
+
   // OSMシーン構築
   const osm = await osmP;
   if (token !== buildToken) return;
@@ -1551,6 +1696,7 @@ async function fetchWorld(lat, lng) {
   showFetchIndicator(false);
   S.isFetching = false;
   fetchWeather(lat, lng);
+  fetchWaze(lat, lng).then(function(ok){ if (ok) buildWazeLayer(token); });
 }
 
 function showFetchIndicator(on) {
@@ -1596,6 +1742,7 @@ function applyNight(on) {
   if (groundMesh) {
     groundMesh.material.color.setHex(photoMode ? (S.night ? 0x8088b8 : 0xffffff) : (S.night ? 0x3a4258 : 0x9aa07a));
   }
+  if (detailMesh) detailMesh.material.color.setHex(S.night ? 0x8088b8 : 0xffffff);
   basePlane.material.color.setHex(S.night ? 0x2c3248 : 0x8a906c);
   roofMat.color.setHex(S.night ? 0x8890b8 : 0xffffff);
   flatMat.color.setHex(S.night ? 0x9098c0 : 0xffffff);
@@ -1792,6 +1939,111 @@ function updateEnv() {
 }
 
 // ============================================================
+// ===== Waze 非公式（取締・事故・通行止・渋滞） =====
+// 公式APIが無いためライブマップの内部エンドポイントをCORSプロキシ
+// 経由で取得。第三者プロキシが落ちた場合はこの層だけ静かに消え、
+// アプリ本体には影響しない設計。
+// ============================================================
+const WAZE_PROXIES = [
+  function(u){ return 'https://corsproxy.io/?url=' + encodeURIComponent(u); },
+  function(u){ return 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u); },
+];
+let wazeData = { alerts: [], jams: [], ok: false };
+async function fetchWaze(lat, lng) {
+  const d = 0.013;
+  const url = 'https://www.waze.com/live-map/api/georss?top=' + (lat+d).toFixed(5) +
+    '&bottom=' + (lat-d).toFixed(5) + '&left=' + (lng-d).toFixed(5) +
+    '&right=' + (lng+d).toFixed(5) + '&env=row&types=alerts,traffic';
+  for (let i = 0; i < WAZE_PROXIES.length; i++) {
+    try {
+      const ctrl = new AbortController();
+      const tm = setTimeout(function(){ ctrl.abort(); }, 9000);
+      const res = await fetch(WAZE_PROXIES[i](url), { signal: ctrl.signal });
+      clearTimeout(tm);
+      if (!res.ok) continue;
+      const js = await res.json();
+      if (js && (js.alerts || js.jams)) {
+        wazeData = { alerts: js.alerts || [], jams: js.jams || [], ok: true };
+        return true;
+      }
+    } catch (e) {}
+  }
+  return false;
+}
+function clearWazeLayer() {
+  for (let i = infoGroup.children.length - 1; i >= 0; i--) {
+    const m = infoGroup.children[i];
+    if (!m.userData.waze) continue;
+    if (m.geometry) m.geometry.dispose();
+    if (m.material) {
+      if (m.userData.ownTex && m.material.map) m.material.map.dispose();
+      if (m.userData.ownMat) m.material.dispose();
+    }
+    infoGroup.remove(m);
+  }
+}
+function buildWazeLayer(token) {
+  if (token !== buildToken) return;
+  clearWazeLayer();
+  infoStats.police.length = 0;
+  infoStats.accidents.length = 0;
+  infoStats.jams.length = 0;
+  const A = newAcc();
+  for (let k = 0; k < wazeData.alerts.length; k++) {
+    const a = wazeData.alerts[k];
+    if (!a.location) continue;
+    const p = latLngToXZ(a.location.y, a.location.x, ORIGIN.lat, ORIGIN.lng);
+    if (Math.abs(p.x) > 1600 || Math.abs(p.z) > 1600) continue;
+    const gy = groundYWorld(p.x, p.z);
+    let sp = null;
+    if (a.type === 'POLICE') { sp = addMarkerTo(infoGroup, '👮', '取締', p.x, gy+24, p.z); infoStats.police.push(a.street || ''); }
+    else if (a.type === 'ACCIDENT') { sp = addMarkerTo(infoGroup, '💥', '事故', p.x, gy+24, p.z); infoStats.accidents.push(a.street || ''); }
+    else if (a.type === 'ROAD_CLOSED') { sp = addMarkerTo(infoGroup, '⛔', '通行止', p.x, gy+22, p.z); }
+    else if (a.type === 'HAZARD') { sp = addMarkerTo(infoGroup, '⚠️', '注意', p.x, gy+20, p.z); }
+    if (sp) sp.userData.waze = true;
+  }
+  for (let k = 0; k < wazeData.jams.length; k++) {
+    const j = wazeData.jams[k];
+    if (!j.line || j.line.length < 2) continue;
+    const jpts = [];
+    for (let i = 0; i < j.line.length; i++) {
+      const p = latLngToXZ(j.line[i].y, j.line[i].x, ORIGIN.lat, ORIGIN.lng);
+      jpts.push({ x: p.x, z: p.z });
+    }
+    buildStrip(A, jpts, 5, (j.level >= 4 ? [0.92,0.1,0.08] : [0.95,0.45,0.08]), 0.5);
+    infoStats.jams.push({ street: j.street || '', spd: Math.round(j.speedKMH || 0), level: j.level || 0 });
+  }
+  const jm = finishAcc(A, flatMat, infoGroup);
+  if (jm) jm.userData.waze = true;
+  renderInfo();
+}
+
+// ===== 情報タブ =====
+function renderInfo() {
+  const list = document.getElementById('info-list');
+  if (!list) return;
+  list.textContent = '';
+  function row(icon, title, val) {
+    const d = document.createElement('div'); d.className = 'info-item';
+    const l = document.createElement('span'); l.className = 'info-t'; l.textContent = icon + ' ' + title;
+    const v = document.createElement('span'); v.className = 'info-v'; v.textContent = val;
+    d.appendChild(l); d.appendChild(v); list.appendChild(d);
+  }
+  row('🕐', '現地時刻', String(new Date().getHours()).padStart(2,'0') + ':' + String(new Date().getMinutes()).padStart(2,'0'));
+  row('🌡', '気温・天気', envTemp === null ? '取得待ち' : envTemp.toFixed(1) + '°C ' + weatherIcon(envWeatherCode));
+  row('👥', '推定人出', Math.round(trafficDensity()*100) + '%（実時刻・天気連動）');
+  row('📷', 'オービス', infoStats.cams + '箇所');
+  row('🚧', '工事区間', infoStats.works + '件');
+  row('👮', '取締情報', wazeData.ok ? infoStats.police.length + '件' : '取得待ち');
+  row('💥', '事故', wazeData.ok ? infoStats.accidents.length + '件' : '取得待ち');
+  row('🚗', '渋滞', wazeData.ok ? infoStats.jams.length + '区間' : '取得待ち');
+  for (let i = 0; i < Math.min(3, infoStats.jams.length); i++) {
+    const j = infoStats.jams[i];
+    row('　└', j.street || '（道路名なし）', j.spd + ' km/h');
+  }
+}
+
+// ============================================================
 // ===== ジョイスティック・操作 =====
 // ============================================================
 function setupJoy(baseId, knobId, onMove, onEnd) {
@@ -1876,12 +2128,14 @@ function toggleAuto() {
 // ===== タブ・出発地・ログ =====
 // ============================================================
 function switchTab(tab) {
-  ['fly','depart','log'].forEach(t =>
+  ['fly','depart','info','log'].forEach(t =>
     document.getElementById('tab-' + t).classList.toggle('active', t === tab));
   document.getElementById('panel-depart').classList.toggle('active', tab === 'depart');
+  document.getElementById('panel-info').classList.toggle('active', tab === 'info');
   document.getElementById('panel-log').classList.toggle('active', tab === 'log');
   document.getElementById('fly-controls').style.display = tab === 'fly' ? '' : 'none';
   if (tab === 'log') { renderLog(); updateStats(); }
+  if (tab === 'info') renderInfo();
 }
 
 function flyTo(lat, lng, name, btn) {
@@ -2066,6 +2320,7 @@ function mainLoop() {
   updateHUD();
   if (frame % 10 === 0) drawMinimap();
   if (frame % 50 === 0) checkRefetch();
+  if (frame % 60 === 30) checkDetailRefresh();
   renderer.render(scene, camera);
 }
 
@@ -2124,6 +2379,10 @@ async function init() {
   setInterval(updateStats, 15000);
   setInterval(() => fetchWeather(S.lat, S.lng), 600000);
   setInterval(() => { if (!S.isFetching && TRAF_PATHS.ped.length + TRAF_PATHS.car.length > 0) spawnTraffic(); }, 600000);
+  setInterval(() => {
+    if (S.isFetching) return;
+    fetchWaze(S.lat, S.lng).then(function(ok){ if (ok) buildWazeLayer(buildToken); });
+  }, 180000);
 }
 
 // ============================================================
