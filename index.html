@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ドローン飛行</title>
-<script>const APP_VERSION = '11.0.0';</script>
+<script>const APP_VERSION = '11.1.0';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
@@ -45,6 +45,7 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
 #compass { position:fixed; top:58px; left:50%; transform:translateX(-50%); text-align:center; z-index:30; pointer-events:none; }
 #compass-dir { font-size:15px;color:var(--accent);display:block;text-shadow:0 0 8px var(--accent); }
 #coords-display { font-size:9px;color:var(--dim); }
+#env-display { font-size:10px;color:var(--accent2);display:block;margin-top:1px; }
 #pitch-indicator { position:fixed; right:14px; top:58%; transform:translateY(-50%); z-index:30; pointer-events:none; display:flex; flex-direction:column; align-items:center; gap:2px; }
 .pitch-bar { width:3px; height:60px; background:var(--border); border-radius:2px; position:relative; }
 .pitch-fill { position:absolute; width:3px; background:var(--accent); border-radius:2px; left:0; }
@@ -186,7 +187,7 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
   <div class="hud-b" style="align-items:center"><span class="hud-l">◈ ドローン飛行</span><span class="hud-v" style="font-size:11px" id="mode-display">手動</span></div>
   <div class="hud-b" style="align-items:flex-end"><span class="hud-l">速度</span><span class="hud-v" id="spd-display">0 km/h</span><span style="font-size:8px;color:var(--dim)" id="ver-display">v11</span></div>
 </div>
-<div id="compass"><span id="compass-dir">北</span><span id="coords-display">--</span></div>
+<div id="compass"><span id="compass-dir">北</span><span id="coords-display">--</span><span id="env-display">--:--</span></div>
 <div id="pitch-indicator">
   <span class="pitch-lbl">仰角</span>
   <div class="pitch-bar"><div class="pitch-fill" id="pitch-fill"></div></div>
@@ -303,7 +304,7 @@ const JOY_R = 32;
 const FETCH_RADIUS = 700;     // Overpass取得半径(m)
 const REFETCH_DIST = 400;     // 再取得トリガー距離(m)
 const M_LAT = 111320;         // 1度あたりメートル(緯度)
-const PHOTO_Z = 16;           // 航空写真タイルズーム
+const PHOTO_Z = 17;           // 航空写真タイルズーム（z17×8×8=2048px）
 const DEM_Z = 14;             // 標高タイルズーム
 const MAX_BUILDINGS = 1200;
 const MAX_TREES = 160;
@@ -592,7 +593,7 @@ async function getTileImg(url) {
   if (tileImgCache.has(url)) return tileImgCache.get(url);
   const im = await loadImg(url);
   if (im) {
-    if (tileImgCache.size > 120) tileImgCache.clear();
+    if (tileImgCache.size > 160) tileImgCache.clear();
     tileImgCache.set(url, im);
   }
   return im;
@@ -808,25 +809,25 @@ function buildTexCross(A, x, z, y0, y1, w, col) {
 // ============================================================
 let groundMesh = null;
 async function buildGround(lat, lng, token) {
-  // 中心タイルの周囲4×4（z16）≒ 1.2〜1.9km四方をカバー
+  // 中心タイルの周囲8×8（z17）≒ 同範囲を2倍解像度でカバー
   const ct = lngLatToTile(lng, lat, PHOTO_Z);
   const tx = Math.floor(ct.x), ty = Math.floor(ct.y);
-  const x0 = tx-1, y0 = ty-1;
+  const x0 = tx-3, y0 = ty-3;
   const nw = tileToLngLat(x0, y0, PHOTO_Z);
-  const se = tileToLngLat(x0+4, y0+4, PHOTO_Z);
+  const se = tileToLngLat(x0+8, y0+8, PHOTO_Z);
 
   // 標高を先に取得（地面変位と建物配置の両方で使う）
   try { await fetchDEM(nw.lat, nw.lng, se.lat, se.lng); } catch(e){ DEM.ok = false; }
 
-  // 写真タイルを1024canvasへ結合
+  // 写真タイルを2048canvasへ結合
   const cv = document.createElement('canvas');
-  cv.width = cv.height = 1024;
+  cv.width = cv.height = 2048;
   const ctx = cv.getContext('2d');
   ctx.fillStyle = '#5a6a50';
-  ctx.fillRect(0,0,1024,1024);
+  ctx.fillRect(0,0,2048,2048);
   let fails = 0;
   const jobs = [];
-  for (let dx=0; dx<4; dx++) for (let dy=0; dy<4; dy++) {
+  for (let dx=0; dx<8; dx++) for (let dy=0; dy<8; dy++) {
     jobs.push((async()=>{
       const im = await getTileImg('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/' + PHOTO_Z + '/' + (x0+dx) + '/' + (y0+dy) + '.jpg');
       if (im) ctx.drawImage(im, dx*256, dy*256, 256, 256);
@@ -835,7 +836,7 @@ async function buildGround(lat, lng, token) {
   }
   await Promise.all(jobs);
 
-  photoMode = fails < 8; // 半分以上失敗ならフォールバック（海外等）
+  photoMode = fails < 32; // 半分以上失敗ならフォールバック（海外等）
 
   if (photoMode) {
     const pNW = latLngToXZ(nw.lat, nw.lng, ORIGIN.lat, ORIGIN.lng);
@@ -843,6 +844,7 @@ async function buildGround(lat, lng, token) {
     const w = pSE.x - pNW.x, d = pSE.z - pNW.z;
     const tex = new THREE.CanvasTexture(cv);
     tex.encoding = THREE.sRGBEncoding;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
     const geo = new THREE.PlaneGeometry(w, d, 96, 96);
     geo.rotateX(-Math.PI/2);
     const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map:tex, color:0xffffff }));
@@ -1388,6 +1390,7 @@ async function fetchWorld(lat, lng) {
   applyNight(S.night);
   showFetchIndicator(false);
   S.isFetching = false;
+  fetchWeather(lat, lng);
 }
 
 function showFetchIndicator(on) {
@@ -1576,6 +1579,31 @@ function updateStats() {
   document.getElementById('fs-time').textContent =
     mins < 60 ? mins + '分' : Math.floor(mins/60) + '時間' + (mins%60) + '分';
   document.getElementById('fs-spots').textContent = S.log.length + '地点';
+}
+
+// ===== 時刻・気温（Open-Meteo：現在地の実気温） =====
+let envTemp = null;
+async function fetchWeather(lat, lng) {
+  try {
+    const ctrl = new AbortController();
+    const tm = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(
+      'https://api.open-meteo.com/v1/forecast?latitude=' + lat.toFixed(3) +
+      '&longitude=' + lng.toFixed(3) + '&current=temperature_2m',
+      { signal: ctrl.signal });
+    clearTimeout(tm);
+    const js = await res.json();
+    if (js && js.current && typeof js.current.temperature_2m === 'number') {
+      envTemp = js.current.temperature_2m;
+      updateEnv();
+    }
+  } catch (e) {}
+}
+function updateEnv() {
+  const d = new Date();
+  const t = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  document.getElementById('env-display').textContent =
+    envTemp === null ? t : t + '  ' + envTemp.toFixed(1) + '°C';
 }
 
 // ============================================================
@@ -1846,6 +1874,7 @@ function mainLoop() {
     const b = Math.round(S.battery);
     document.getElementById('bat-lbl').textContent = '電池' + b + '%';
     document.getElementById('bat-dot').className = b > 25 ? 's-dot' : 's-dot warn';
+    updateEnv();
   }
 
   updateHUD();
@@ -1907,6 +1936,7 @@ async function init() {
 
   requestAnimationFrame(mainLoop);
   setInterval(updateStats, 15000);
+  setInterval(() => fetchWeather(S.lat, S.lng), 600000);
 }
 
 // ============================================================
