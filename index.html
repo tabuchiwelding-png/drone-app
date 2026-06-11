@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ドローン飛行</title>
-<script>const APP_VERSION = '11.1.0';</script>
+<script>const APP_VERSION = '11.2.0';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
@@ -209,6 +209,7 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
   <button class="tool-btn" id="btn-photo" onclick="takePhoto()">📷</button>
   <button class="tool-btn active" id="btn-map" onclick="toggleMap()">🗺</button>
   <button class="tool-btn active" id="btn-label" onclick="toggleLabels()">🏷</button>
+  <button class="tool-btn active" id="btn-traf" onclick="toggleTraffic()">🚶</button>
 </div>
 <canvas id="minimap" width="112" height="112"></canvas>
 
@@ -328,7 +329,7 @@ const S = {
   gpsOk:false,
   lastFetchLat:null, lastFetchLng:null,
   isFetching:false,
-  night:false, mapOn:true, labelsOn:true,
+  night:false, mapOn:true, labelsOn:true, trafficOn:true,
   totalDist:0, startTime:Date.now(),
   droneGroundY:0,
 };
@@ -342,11 +343,12 @@ try {
   if (typeof sv.night==='boolean') S.night = sv.night;
   if (typeof sv.mapOn==='boolean') S.mapOn = sv.mapOn;
   if (typeof sv.labelsOn==='boolean') S.labelsOn = sv.labelsOn;
+  if (typeof sv.trafficOn==='boolean') S.trafficOn = sv.trafficOn;
   const lg = JSON.parse(localStorage.getItem('drone_log_v1')||'[]');
   if (Array.isArray(lg)) S.log = lg.slice(0,50);
 } catch(e) {}
 function saveSettings(){
-  try { localStorage.setItem('drone_settings_v1', JSON.stringify({night:S.night,mapOn:S.mapOn,labelsOn:S.labelsOn})); } catch(e){}
+  try { localStorage.setItem('drone_settings_v1', JSON.stringify({night:S.night,mapOn:S.mapOn,labelsOn:S.labelsOn,trafficOn:S.trafficOn})); } catch(e){}
 }
 function saveLog(){
   try { localStorage.setItem('drone_log_v1', JSON.stringify(S.log.slice(0,50))); } catch(e){}
@@ -672,6 +674,153 @@ const basePlane = new THREE.Mesh(
 basePlane.rotation.x = -Math.PI/2;
 basePlane.position.y = -2;
 scene.add(basePlane);
+
+// ============================================================
+// ===== リアルタイム交通（人影・車シルエット） =====
+// 個々の位置データは存在しないため、実データ（OSM道路網 × 実時刻の
+// 人出カーブ）に基づき生成する統計シミュレーション。
+// ============================================================
+const TRAF_MAX_PED = 80, TRAF_MAX_CAR = 50;
+const trafGroup = new THREE.Group(); world.add(trafGroup);
+
+function makePersonTex() {
+  const cv = document.createElement('canvas');
+  cv.width = 64; cv.height = 128;
+  const c = cv.getContext('2d');
+  c.clearRect(0, 0, 64, 128);
+  c.fillStyle = '#ffffff';
+  c.beginPath(); c.arc(32, 16, 10, 0, Math.PI*2); c.fill();
+  c.beginPath();
+  c.moveTo(20, 30); c.quadraticCurveTo(32, 24, 44, 30);
+  c.lineTo(46, 74); c.lineTo(18, 74); c.closePath(); c.fill();
+  c.fillRect(21, 72, 9, 52);
+  c.fillRect(35, 72, 9, 52);
+  return new THREE.CanvasTexture(cv);
+}
+const personGeo = new THREE.PlaneGeometry(0.95, 1.9);
+personGeo.translate(0, 0.95, 0);
+const personMat = new THREE.MeshBasicMaterial({ map: makePersonTex(), color: 0x07090d, transparent: true, alphaTest: 0.4, side: THREE.DoubleSide });
+const pedMesh = new THREE.InstancedMesh(personGeo, personMat, TRAF_MAX_PED);
+pedMesh.frustumCulled = false;
+pedMesh.count = 0;
+trafGroup.add(pedMesh);
+
+function makeCarGeo() {
+  const body = new THREE.BoxGeometry(1.75, 1.1, 4.3); body.translate(0, 0.72, 0);
+  const cab  = new THREE.BoxGeometry(1.6, 0.62, 2.1);  cab.translate(0, 1.55, -0.25);
+  const pos = [], norm = [];
+  [body, cab].forEach(g0 => {
+    const g = g0.toNonIndexed();
+    for (let i = 0; i < g.attributes.position.array.length; i++) pos.push(g.attributes.position.array[i]);
+    for (let i = 0; i < g.attributes.normal.array.length; i++) norm.push(g.attributes.normal.array[i]);
+    g.dispose(); g0.dispose();
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(norm, 3));
+  return geo;
+}
+const carMat = new THREE.MeshLambertMaterial({ color: 0x14171d });
+const carMesh = new THREE.InstancedMesh(makeCarGeo(), carMat, TRAF_MAX_CAR);
+carMesh.frustumCulled = false;
+carMesh.count = 0;
+trafGroup.add(carMesh);
+
+const peds = [], cars = [];
+const TRAF_PATHS = { ped:[], car:[] };
+const TRAF_WALK  = { footway:1, path:1, pedestrian:1, living_street:1, residential:1 };
+const TRAF_DRIVE = { motorway:1, trunk:1, primary:1, secondary:1, tertiary:1, residential:1, unclassified:1, service:1, living_street:1 };
+
+// 実時刻の人出カーブ（通勤ピーク1.0／昼0.65／深夜0.08）
+function trafficDensity() {
+  const wf = (envWeatherCode !== null && envWeatherCode >= 51) ? 0.5 : 1;
+  return hourDensity() * wf;
+}
+function hourDensity() {
+  const h = new Date().getHours();
+  if (h >= 7 && h <= 9) return 1.0;
+  if (h >= 17 && h <= 19) return 1.0;
+  if (h >= 10 && h <= 16) return 0.65;
+  if (h >= 20 && h <= 22) return 0.45;
+  if (h === 5 || h === 6) return 0.25;
+  return 0.08;
+}
+
+function spawnAgents(list, paths, n, spdMin, spdMax) {
+  list.length = 0;
+  if (!paths.length || n <= 0) return 0;
+  for (let i = 0; i < n; i++) {
+    const pts = paths[(Math.random() * paths.length) | 0];
+    list.push({
+      pts: pts,
+      seg: (Math.random() * (pts.length - 1)) | 0,
+      t: Math.random(),
+      dir: Math.random() < 0.5 ? -1 : 1,
+      spd: spdMin + Math.random() * (spdMax - spdMin),
+      ph: Math.random() * Math.PI * 2,
+    });
+  }
+  return list.length;
+}
+
+function spawnTraffic() {
+  const dens = trafficDensity();
+  pedMesh.count = spawnAgents(peds, TRAF_PATHS.ped, Math.round(TRAF_MAX_PED * dens), 0.9, 1.7);
+  carMesh.count = spawnAgents(cars, TRAF_PATHS.car, Math.round(TRAF_MAX_CAR * dens), 5.5, 12);
+  pedMesh.instanceMatrix.needsUpdate = true;
+  carMesh.instanceMatrix.needsUpdate = true;
+}
+
+const _tm = new THREE.Matrix4();
+const _tq = new THREE.Quaternion();
+const _tp = new THREE.Vector3();
+const _ts = new THREE.Vector3(1, 1, 1);
+const _tY = new THREE.Vector3(0, 1, 0);
+
+function advanceAgent(a, dt) {
+  const pts = a.pts;
+  let A = pts[a.seg], B = pts[a.seg + 1];
+  const len = Math.hypot(B.x - A.x, B.z - A.z) || 0.01;
+  a.t += a.dir * a.spd * dt / len;
+  if (a.t > 1) {
+    if (a.seg + 2 < pts.length) { a.seg++; a.t = 0; }
+    else { a.dir = -1; a.t = 1; }
+  } else if (a.t < 0) {
+    if (a.seg > 0) { a.seg--; a.t = 1; }
+    else { a.dir = 1; a.t = 0; }
+  }
+  A = pts[a.seg]; B = pts[a.seg + 1];
+  return {
+    x: A.x + (B.x - A.x) * a.t,
+    z: A.z + (B.z - A.z) * a.t,
+    ang: Math.atan2((B.x - A.x) * a.dir, (B.z - A.z) * a.dir),
+  };
+}
+
+function updateTraffic(dt, now) {
+  if (!trafGroup.visible) return;
+  if (pedMesh.count === 0 && carMesh.count === 0) return;
+  // 人影：常にカメラへ正対（どの角度からも人型が見える）
+  for (let i = 0; i < pedMesh.count; i++) {
+    const a = peds[i];
+    const p = advanceAgent(a, dt);
+    const bob = Math.sin(now * 0.012 + a.ph) * 0.05;
+    _tp.set(p.x, groundYWorld(p.x, p.z) + 0.36 + bob, p.z);
+    _tm.compose(_tp, camera.quaternion, _ts);
+    pedMesh.setMatrixAt(i, _tm);
+  }
+  // 車：進行方向に向ける
+  for (let i = 0; i < carMesh.count; i++) {
+    const a = cars[i];
+    const p = advanceAgent(a, dt);
+    _tq.setFromAxisAngle(_tY, p.ang);
+    _tp.set(p.x, groundYWorld(p.x, p.z) + 0.36, p.z);
+    _tm.compose(_tp, _tq, _ts);
+    carMesh.setMatrixAt(i, _tm);
+  }
+  if (pedMesh.count) pedMesh.instanceMatrix.needsUpdate = true;
+  if (carMesh.count) carMesh.instanceMatrix.needsUpdate = true;
+}
 
 function disposeGroup(g) {
   while (g.children.length) {
@@ -1090,6 +1239,14 @@ async function buildScene(data, token) {
         buildStrip(A.flat, pts, width, col, 0.35);
         if (MAJOR[hw]) buildStrip(A.flat, pts, 0.55, [0.92,0.92,0.88], 0.42);
       }
+      if (!isBridge) {
+        let plen = 0;
+        for (let s=0; s<pts.length-1; s++) plen += Math.hypot(pts[s+1].x-pts[s].x, pts[s+1].z-pts[s].z);
+        if (plen > 30) {
+          if (TRAF_WALK[hw]) TRAF_PATHS.ped.push(pts);
+          if (TRAF_DRIVE[hw]) TRAF_PATHS.car.push(pts);
+        }
+      }
       MM.roads.push({ pts:pts.map(p=>[p.x,p.z]), major:!!MAJOR[hw]||hw==='tertiary', rail:false });
       if (++i % 60 === 0) { await tick(); if (token !== buildToken) return; }
     }
@@ -1253,6 +1410,7 @@ async function buildScene(data, token) {
     addLabel(labels[k].name, labels[k].x, labels[k].y, labels[k].z);
   }
   labelGroup.visible = S.labelsOn;
+  spawnTraffic();
 }
 
 // ===== ラベルスプライト =====
@@ -1335,6 +1493,8 @@ async function fetchWorld(lat, lng) {
 
   ORIGIN = { lat: lat, lng: lng, elev: 0 };
   clearWorld();
+  pedMesh.count = 0; carMesh.count = 0;
+  TRAF_PATHS.ped.length = 0; TRAF_PATHS.car.length = 0;
   groundMesh = null;
   MM.roads.length = 0; MM.waters.length = 0; MM.blds.length = 0;
 
@@ -1441,6 +1601,9 @@ function applyNight(on) {
   flatMat.color.setHex(S.night ? 0x9098c0 : 0xffffff);
   waterMat.color.setHex(S.night ? 0x1c3a55 : 0x3f88b4);
   leafMat.color.setHex(S.night ? 0x70789a : 0xffffff);
+  carMat.color.setHex(S.night ? 0x2a3142 : 0x14171d);
+  carMat.emissive.setHex(S.night ? 0x141a26 : 0x000000);
+  personMat.color.setHex(S.night ? 0x2e3340 : 0x07090d);
 
   saveSettings();
 }
@@ -1462,7 +1625,16 @@ function toggleLabels() {
   S.labelsOn = !S.labelsOn;
   labelGroup.visible = S.labelsOn;
   document.getElementById('btn-label').classList.toggle('active', S.labelsOn);
+  document.getElementById('btn-traf').classList.toggle('active', S.trafficOn);
+  trafGroup.visible = S.trafficOn;
   saveSettings();
+}
+function toggleTraffic() {
+  S.trafficOn = !S.trafficOn;
+  trafGroup.visible = S.trafficOn;
+  document.getElementById('btn-traf').classList.toggle('active', S.trafficOn);
+  saveSettings();
+  showToast(S.trafficOn ? '人・車：実時刻連動シミュレーション ON' : '人・車 OFF');
 }
 function resetView() {
   S.camPitch = -8; S.heading = 0;
@@ -1583,27 +1755,40 @@ function updateStats() {
 
 // ===== 時刻・気温（Open-Meteo：現在地の実気温） =====
 let envTemp = null;
+let envWeatherCode = null;
 async function fetchWeather(lat, lng) {
   try {
     const ctrl = new AbortController();
     const tm = setTimeout(() => ctrl.abort(), 8000);
     const res = await fetch(
       'https://api.open-meteo.com/v1/forecast?latitude=' + lat.toFixed(3) +
-      '&longitude=' + lng.toFixed(3) + '&current=temperature_2m',
+      '&longitude=' + lng.toFixed(3) + '&current=temperature_2m,weather_code',
       { signal: ctrl.signal });
     clearTimeout(tm);
     const js = await res.json();
     if (js && js.current && typeof js.current.temperature_2m === 'number') {
       envTemp = js.current.temperature_2m;
+      if (typeof js.current.weather_code === 'number') envWeatherCode = js.current.weather_code;
       updateEnv();
     }
   } catch (e) {}
 }
+function weatherIcon(c) {
+  if (c === null) return '';
+  if (c <= 1) return '☀';
+  if (c <= 3) return '⛅';
+  if (c <= 48) return '🌫';
+  if (c >= 95) return '⚡';
+  if ((c >= 71 && c <= 77) || c === 85 || c === 86) return '❄';
+  if (c >= 51) return '☔';
+  return '';
+}
 function updateEnv() {
   const d = new Date();
   const t = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  const w = weatherIcon(envWeatherCode);
   document.getElementById('env-display').textContent =
-    envTemp === null ? t : t + '  ' + envTemp.toFixed(1) + '°C';
+    (envTemp === null ? t : t + '  ' + envTemp.toFixed(1) + '°C') + (w ? ' ' + w : '');
 }
 
 // ============================================================
@@ -1877,6 +2062,7 @@ function mainLoop() {
     updateEnv();
   }
 
+  updateTraffic(dt, now);
   updateHUD();
   if (frame % 10 === 0) drawMinimap();
   if (frame % 50 === 0) checkRefetch();
@@ -1937,6 +2123,7 @@ async function init() {
   requestAnimationFrame(mainLoop);
   setInterval(updateStats, 15000);
   setInterval(() => fetchWeather(S.lat, S.lng), 600000);
+  setInterval(() => { if (!S.isFetching && TRAF_PATHS.ped.length + TRAF_PATHS.car.length > 0) spawnTraffic(); }, 600000);
 }
 
 // ============================================================
@@ -1972,3 +2159,4 @@ init();
 </script>
 </body>
 </html>
+
