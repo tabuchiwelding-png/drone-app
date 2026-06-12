@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ドローン飛行</title>
-<script>const APP_VERSION = '11.4.0';</script>
+<script>const APP_VERSION = '12.0.0';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
@@ -60,7 +60,7 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
 /* ===== 右：ツール列 ===== */
 #auto-btn { position:fixed; top:206px; left:14px; z-index:35; width:78px; background:var(--panel); border:1px solid var(--border); color:var(--accent); font-family:var(--font); font-size:9px; padding:6px 10px; cursor:pointer; min-height:44px; }
 #auto-btn.active{background:rgba(0,255,180,0.2);border-color:var(--accent);}
-#side-tools { position:fixed; top:178px; right:14px; z-index:35; display:grid; grid-template-columns:44px 44px; gap:6px; justify-items:end; }
+#side-tools { position:fixed; top:178px; right:14px; z-index:35; display:flex; flex-direction:column; gap:6px; }
 .tool-btn { width:44px; height:44px; background:var(--panel); border:1px solid var(--border); color:var(--accent2); font-size:17px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
 .tool-btn.active { background:rgba(0,204,255,0.18); border-color:var(--accent2); }
 
@@ -139,6 +139,13 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
 .info-t{font-size:11px;color:var(--text);}
 .info-v{font-size:11px;color:var(--accent);}
 .info-src{font-size:8px;color:var(--dim);padding:12px 16px;line-height:1.7;}
+.set-item{display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid rgba(0,255,180,0.07);cursor:pointer;min-height:50px;}
+.set-t{font-size:12px;color:var(--text);}
+.set-sw{width:44px;height:25px;border-radius:13px;background:rgba(120,130,140,0.25);border:1px solid var(--border);position:relative;transition:all 0.2s;flex-shrink:0;}
+.set-sw::after{content:'';position:absolute;width:19px;height:19px;border-radius:50%;background:#7a8a84;top:2px;left:2px;transition:all 0.2s;}
+.set-sw.on{background:rgba(0,255,180,0.25);border-color:var(--accent);}
+.set-sw.on::after{left:21px;background:var(--accent);box-shadow:0 0 8px var(--accent);}
+.set-ver{font-size:11px;color:var(--accent);padding:14px 16px 4px;letter-spacing:2px;}
 
 /* ===== ローディング・ガイド ===== */
 #loading{position:fixed;inset:0;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:200;gap:16px;}
@@ -163,6 +170,7 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
 <!-- ===== ローディング ===== -->
 <div id="loading">
   <h2>◈ ドローン飛行</h2>
+  <div id="load-ver" style="font-size:11px;color:var(--accent2);letter-spacing:3px">--</div>
   <div class="load-bar"><div class="load-fill" id="load-fill"></div></div>
   <div id="load-status">起動中...</div>
   <p>実地形データを構築中</p>
@@ -194,7 +202,7 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
 <div id="hud-top">
   <div class="hud-b"><span class="hud-l">対地高度</span><span class="hud-v" id="alt-display">60m</span></div>
   <div class="hud-b" style="align-items:center"><span class="hud-l">◈ ドローン飛行</span><span class="hud-v" style="font-size:11px" id="mode-display">手動</span></div>
-  <div class="hud-b" style="align-items:flex-end"><span class="hud-l">速度</span><span class="hud-v" id="spd-display">0 km/h</span><span style="font-size:8px;color:var(--dim)" id="ver-display">v11</span></div>
+  <div class="hud-b" style="align-items:flex-end"><span class="hud-l">速度</span><span class="hud-v" id="spd-display">0 km/h</span><span style="font-size:10px;color:var(--accent);letter-spacing:1px" id="ver-display">v12</span></div>
 </div>
 <div id="compass"><span id="compass-dir">北</span></div>
 <div id="hud-info">
@@ -218,13 +226,8 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
 </div>
 <button id="auto-btn" onclick="toggleAuto()">自動飛行</button>
 <div id="side-tools">
-  <button class="tool-btn" id="btn-view" onclick="resetView()">👁</button>
-  <button class="tool-btn" id="btn-night" onclick="toggleNight()">🌙</button>
   <button class="tool-btn" id="btn-photo" onclick="takePhoto()">📷</button>
-  <button class="tool-btn active" id="btn-map" onclick="toggleMap()">🗺</button>
-  <button class="tool-btn active" id="btn-label" onclick="toggleLabels()">🏷</button>
-  <button class="tool-btn active" id="btn-traf" onclick="toggleTraffic()">🚶</button>
-  <button class="tool-btn" id="btn-gyro" onclick="toggleGyro()">📱</button>
+  <button class="tool-btn" id="btn-view" onclick="resetView()">👁</button>
 </div>
 <canvas id="minimap" width="112" height="112"></canvas>
 
@@ -292,7 +295,21 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
 <div class="panel" id="panel-info">
   <div class="panel-title">◈ 周辺リアルタイム情報</div>
   <div id="info-list"></div>
+  <button class="fly-start-btn" style="margin-top:10px" onclick="refreshInfo()">↻ 情報を再取得</button>
   <div class="info-src">出典: OpenStreetMap / 国土地理院 / Open-Meteo / Waze（非公式・取得不可時は非表示）<br>人・車の個体はシミュレーション。位置（道路・施設）と件数・密度は実データ。</div>
+</div>
+
+<!-- ===== 設定パネル ===== -->
+<div class="panel" id="panel-set">
+  <div class="panel-title">◈ 設定</div>
+  <div class="set-item" onclick="toggleNight()"><span class="set-t">🌙 夜間モード</span><span class="set-sw" id="sw-night"></span></div>
+  <div class="set-item" onclick="toggleMap()"><span class="set-t">🗺 ミニマップ</span><span class="set-sw" id="sw-map"></span></div>
+  <div class="set-item" onclick="toggleLabels()"><span class="set-t">🏷 名称ラベル</span><span class="set-sw" id="sw-label"></span></div>
+  <div class="set-item" onclick="toggleTraffic()"><span class="set-t">🚶 人・車（実時刻連動）</span><span class="set-sw" id="sw-traf"></span></div>
+  <div class="set-item" onclick="toggleHudInfo()"><span class="set-t">📊 走行情報パネル</span><span class="set-sw" id="sw-hud"></span></div>
+  <div class="set-item" onclick="toggleGyro()"><span class="set-t">📱 ジャイロ視点</span><span class="set-sw" id="sw-gyro"></span></div>
+  <div class="set-ver">DRONE FLIGHT v12.0.0</div>
+  <div class="info-src">出典: OpenStreetMap / 国土地理院 / Open-Meteo / Waze（非公式）<br>※通信機能（写真地面・建物・天気・Waze）はGitHub Pages等のWebサーバー上でのみ動作します。ファイルの直接プレビューでは「簡易」モードになります。</div>
 </div>
 
 <!-- ===== ログパネル ===== -->
@@ -311,6 +328,7 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
   <button class="tab-btn active" id="tab-fly" onclick="switchTab('fly')"><span class="tab-icon">🚁</span>飛行</button>
   <button class="tab-btn" id="tab-depart" onclick="switchTab('depart')"><span class="tab-icon">📍</span>出発地</button>
   <button class="tab-btn" id="tab-info" onclick="switchTab('info')"><span class="tab-icon">📡</span>情報</button>
+  <button class="tab-btn" id="tab-set" onclick="switchTab('set')"><span class="tab-icon">⚙️</span>設定</button>
   <button class="tab-btn" id="tab-log" onclick="switchTab('log')"><span class="tab-icon">📋</span>記録</button>
 </div>
 
@@ -354,7 +372,7 @@ const S = {
   gpsOk:false,
   lastFetchLat:null, lastFetchLng:null,
   isFetching:false,
-  night:false, mapOn:true, labelsOn:true, trafficOn:true,
+  night:false, mapOn:true, labelsOn:true, trafficOn:true, hudInfoOn:true,
   totalDist:0, startTime:Date.now(),
   droneGroundY:0,
 };
@@ -369,11 +387,12 @@ try {
   if (typeof sv.mapOn==='boolean') S.mapOn = sv.mapOn;
   if (typeof sv.labelsOn==='boolean') S.labelsOn = sv.labelsOn;
   if (typeof sv.trafficOn==='boolean') S.trafficOn = sv.trafficOn;
+  if (typeof sv.hudInfoOn==='boolean') S.hudInfoOn = sv.hudInfoOn;
   const lg = JSON.parse(localStorage.getItem('drone_log_v1')||'[]');
   if (Array.isArray(lg)) S.log = lg.slice(0,50);
 } catch(e) {}
 function saveSettings(){
-  try { localStorage.setItem('drone_settings_v1', JSON.stringify({night:S.night,mapOn:S.mapOn,labelsOn:S.labelsOn,trafficOn:S.trafficOn})); } catch(e){}
+  try { localStorage.setItem('drone_settings_v1', JSON.stringify({night:S.night,mapOn:S.mapOn,labelsOn:S.labelsOn,trafficOn:S.trafficOn,hudInfoOn:S.hudInfoOn})); } catch(e){}
 }
 function saveLog(){
   try { localStorage.setItem('drone_log_v1', JSON.stringify(S.log.slice(0,50))); } catch(e){}
@@ -1738,9 +1757,7 @@ function checkRefetch() {
 // ============================================================
 function applyNight(on) {
   S.night = !!on;
-  const btn = document.getElementById('btn-night');
-  btn.textContent = S.night ? '☀️' : '🌙';
-  btn.classList.toggle('active', S.night);
+  syncSettings();
 
   scene.background = S.night ? SKY.night : SKY.day;
   scene.fog.color.setHex(S.night ? 0x0a1228 : 0xc0ddf0);
@@ -1789,16 +1806,14 @@ function toggleNight() {
 function toggleMap() {
   S.mapOn = !S.mapOn;
   document.getElementById('minimap').classList.toggle('hidden', !S.mapOn);
-  document.getElementById('btn-map').classList.toggle('active', S.mapOn);
   saveSettings();
+  syncSettings();
 }
 function toggleLabels() {
   S.labelsOn = !S.labelsOn;
   labelGroup.visible = S.labelsOn;
-  document.getElementById('btn-label').classList.toggle('active', S.labelsOn);
-  document.getElementById('btn-traf').classList.toggle('active', S.trafficOn);
-  trafGroup.visible = S.trafficOn;
   saveSettings();
+  syncSettings();
 }
 // ===== ジャイロ視点（端末の傾き・向きで見回す） =====
 const gyro = { on:false, calib:false, a0:0, b0:0, h0:0, p0:0 };
@@ -1807,7 +1822,7 @@ function toggleGyro() {
     const start = function() {
       gyro.on = true;
       gyro.calib = true; // 次のイベントで現姿勢を基準化
-      document.getElementById('btn-gyro').classList.add('active');
+      syncSettings();
       showToast('📱 ジャイロ視点 ON：端末を動かして見回す');
     };
     if (typeof DeviceOrientationEvent !== 'undefined' &&
@@ -1820,7 +1835,7 @@ function toggleGyro() {
     }
   } else {
     gyro.on = false;
-    document.getElementById('btn-gyro').classList.remove('active');
+    syncSettings();
     showToast('📱 ジャイロ視点 OFF');
   }
 }
@@ -1842,8 +1857,8 @@ window.addEventListener('deviceorientation', function(e) {
 function toggleTraffic() {
   S.trafficOn = !S.trafficOn;
   trafGroup.visible = S.trafficOn;
-  document.getElementById('btn-traf').classList.toggle('active', S.trafficOn);
   saveSettings();
+  syncSettings();
   showToast(S.trafficOn ? '人・車：実時刻連動シミュレーション ON' : '人・車 OFF');
 }
 function resetView() {
@@ -2090,6 +2105,17 @@ function buildWazeLayer(token) {
 }
 
 // ===== 情報タブ =====
+function refreshInfo() {
+  showToast('↻ 再取得中...');
+  wazeTried = false;
+  renderInfo();
+  fetchWeather(S.lat, S.lng);
+  fetchWaze(S.lat, S.lng).then(function(ok){
+    if (ok) buildWazeLayer(buildToken);
+    renderInfo();
+    showToast(ok ? '✓ Waze接続成功' : '✗ Waze全経路接続不可');
+  });
+}
 function renderInfo() {
   const list = document.getElementById('info-list');
   if (!list) return;
@@ -2201,14 +2227,32 @@ function toggleAuto() {
 // ===== タブ・出発地・ログ =====
 // ============================================================
 function switchTab(tab) {
-  ['fly','depart','info','log'].forEach(t =>
+  ['fly','depart','info','set','log'].forEach(t =>
     document.getElementById('tab-' + t).classList.toggle('active', t === tab));
   document.getElementById('panel-depart').classList.toggle('active', tab === 'depart');
   document.getElementById('panel-info').classList.toggle('active', tab === 'info');
+  document.getElementById('panel-set').classList.toggle('active', tab === 'set');
   document.getElementById('panel-log').classList.toggle('active', tab === 'log');
   document.getElementById('fly-controls').style.display = tab === 'fly' ? '' : 'none';
   if (tab === 'log') { renderLog(); updateStats(); }
   if (tab === 'info') renderInfo();
+  if (tab === 'set') syncSettings();
+}
+
+// 設定スイッチの状態を一括同期
+function syncSettings() {
+  const m = { 'sw-night':S.night, 'sw-map':S.mapOn, 'sw-label':S.labelsOn,
+              'sw-traf':S.trafficOn, 'sw-hud':S.hudInfoOn, 'sw-gyro':gyro.on };
+  for (const id in m) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('on', !!m[id]);
+  }
+}
+function toggleHudInfo() {
+  S.hudInfoOn = !S.hudInfoOn;
+  document.getElementById('hud-info').style.display = S.hudInfoOn ? '' : 'none';
+  saveSettings();
+  syncSettings();
 }
 
 function flyTo(lat, lng, name, btn) {
@@ -2411,11 +2455,13 @@ function closeGuide() {
 
 async function init() {
   applyNight(S.night);
-  document.getElementById('btn-map').classList.toggle('active', S.mapOn);
-  document.getElementById('btn-label').classList.toggle('active', S.labelsOn);
+  trafGroup.visible = S.trafficOn;
+  document.getElementById('hud-info').style.display = S.hudInfoOn ? '' : 'none';
+  syncSettings();
   document.getElementById('minimap').classList.toggle('hidden', !S.mapOn);
   labelGroup.visible = S.labelsOn;
   document.getElementById('ver-display').textContent = 'v' + APP_VERSION;
+  document.getElementById('load-ver').textContent = 'v' + APP_VERSION;
   renderLog();
   updateStats();
 
@@ -2443,6 +2489,7 @@ async function init() {
 
   setTimeout(() => {
     document.getElementById('loading').style.display = 'none';
+    showToast('DRONE FLIGHT v' + APP_VERSION + ' 起動');
     let seen = false;
     try { seen = localStorage.getItem('drone_guide_v1') === '1'; } catch (e) {}
     if (!seen) document.getElementById('guide-overlay').style.display = 'flex';
