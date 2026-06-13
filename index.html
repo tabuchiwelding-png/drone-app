@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>ドローン飛行</title>
-<script>const APP_VERSION = '14.0.0';</script>
+<script>const APP_VERSION = '14.1.0';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
@@ -84,6 +84,8 @@ body.shooting #hud-top,body.shooting #ctrl-speed-row,body.shooting #hud-info,bod
 /* ===== インジケータ・トースト ===== */
 #fetch-indicator { position:fixed; top:106px; left:50%; transform:translateX(-50%); z-index:35; font-size:9px; color:var(--accent); opacity:0; transition:opacity 0.3s; pointer-events:none; background:rgba(0,10,8,0.8); padding:4px 12px; border:1px solid var(--border); }
 #fetch-indicator.show { opacity:1; }
+#diag-panel { position:fixed; bottom:200px; left:8px; z-index:60; font-size:9px; color:#0f0; background:rgba(0,0,0,0.82); padding:5px 8px; border:1px solid #0a4; max-width:240px; line-height:1.5; white-space:pre-wrap; font-family:monospace; pointer-events:auto; max-height:80px; overflow:hidden; }
+#diag-panel.big { max-height:60vh; overflow:auto; max-width:90vw; bottom:120px; }
 #toast { position:fixed; bottom:calc(var(--tab-h) + 190px); left:50%; transform:translateX(-50%); z-index:120; font-size:11px; color:var(--accent); background:rgba(0,14,10,0.92); border:1px solid var(--accent); padding:8px 18px; opacity:0; transition:opacity 0.3s; pointer-events:none; white-space:nowrap; max-width:92vw; overflow:hidden; }
 #toast.show { opacity:1; }
 
@@ -256,6 +258,7 @@ body.shooting #hud-top,body.shooting #compass,body.shooting #hud-info,body.shoot
   <span id="pitch-val">0°</span>
 </div>
 <div id="fetch-indicator">◈ データ更新中</div>
+<div id="diag-panel" onclick="this.classList.toggle('big')">診断: 起動待ち</div>
 <div id="toast"></div>
 <div id="flash"></div>
 <div id="logcard-overlay" onclick="if(event.target===this)closeLogCard()">
@@ -372,7 +375,7 @@ body.shooting #hud-top,body.shooting #compass,body.shooting #hud-info,body.shoot
   <div class="set-item" onclick="toggleHudInfo()"><span class="set-t">📊 走行情報パネル</span><span class="set-sw" id="sw-hud"></span></div>
   <div class="set-item" onclick="toggleGyro()"><span class="set-t">📱 ジャイロ視点</span><span class="set-sw" id="sw-gyro"></span></div>
   <div class="set-item" onclick="toggleSound()"><span class="set-t">🔊 プロペラ音（速度連動）</span><span class="set-sw" id="sw-sound"></span></div>
-  <div class="set-ver">DRONE FLIGHT v14.0.0</div>
+  <div class="set-ver">DRONE FLIGHT v14.1.0</div>
   <div class="info-src">出典: OpenStreetMap / 国土地理院 / Open-Meteo（すべて公式API）<br>※通信機能（写真地面・建物・天気・道路情報）はGitHub Pages等のWebサーバー上でのみ動作します。ファイルの直接プレビューでは「簡易」モードになります。</div>
 </div>
 
@@ -1559,10 +1562,11 @@ async function buildScene(data, token) {
     if ((i+1) % CHUNK === 0) {
       ind.textContent = '◈ 建物構築中 ' + (i+1) + '/' + bInfos.length;
       await tick();
-      if (token !== buildToken) return;
+      if (token !== buildToken) { diag('⚠建物' + (i+1) + '/' + bInfos.length + 'でtoken変化→中断'); return; }
     }
   }
-  await tick(); if (token !== buildToken) return;
+  diag('建物ループ完了 ' + bInfos.length + '棟');
+  await tick(); if (token !== buildToken) { diag('⚠建物後tick中断'); return; }
 
   // ---- 樹木 ----
   ind.textContent = '◈ 樹木・信号構築中';
@@ -1635,6 +1639,7 @@ async function buildScene(data, token) {
   await tick(); if (token !== buildToken) return;
 
   // ---- 統合メッシュ確定（描画コールを最小化） ----
+  diag('finishAcc呼出 wallO頂点=' + A.wallO.p.length/3);
   finishAcc(A.wallO, WALLMATS.office, buildGroup);
   finishAcc(A.wallR, WALLMATS.residential, buildGroup);
   finishAcc(A.wallL, WALLMATS.low, buildGroup);
@@ -1643,6 +1648,7 @@ async function buildScene(data, token) {
   finishAcc(A.water, waterMat, waterGroup);
   finishAcc(A.leaf, leafMat, treeGroup);
   finishAcc(A.sig, signalMat, treeGroup);
+  diag('🏢建物メッシュ追加完了 buildGroup子=' + buildGroup.children.length);
 
   // ---- 名称ラベル（優先度＋近距離順／重複排除／上限） ----
   for (let k=0; k<labelCands.length; k++) {
@@ -1802,8 +1808,10 @@ async function fetchWorld(lat, lng) {
   world.position.set(-p0.x, 0, -p0.z);
 
   // 地面（GSI航空写真 + DEM地形）
-  try { await buildGround(lat, lng, token); } catch (e) { photoMode = false; }
-  if (token !== buildToken) return;
+  diag('🌍fetchWorld開始 ' + lat.toFixed(3) + ',' + lng.toFixed(3));
+  try { await buildGround(lat, lng, token); diag('地面OK photoMode=' + photoMode + ' DEM=' + DEM.ok); }
+  catch (e) { photoMode = false; diag('❌地面失敗: ' + e.message); }
+  if (token !== buildToken) { diag('⚠地面後にtoken変化→中断'); return; }
 
   // 標高基準を出発点に合わせ、地面メッシュを相対化
   if (DEM.ok) {
@@ -1831,13 +1839,15 @@ async function fetchWorld(lat, lng) {
 
   // OSMシーン構築
   const osm = await osmP;
-  if (token !== buildToken) return;
+  if (token !== buildToken) { diag('⚠OSM待ち後にtoken変化→中断'); return; }
+  diag('OSM取得: ' + (osm && osm.elements ? osm.elements.length + '要素' : 'なし'));
   let usedReal = false;
   if (osm && osm.elements && osm.elements.length > 0) {
-    try { await buildScene(osm, token); usedReal = true; } catch (e) { usedReal = false; }
-    if (token !== buildToken) return;
+    try { await buildScene(osm, token); usedReal = true; diag('✅buildScene完了'); }
+    catch (e) { usedReal = false; diag('❌buildScene例外: ' + e.message + ' @' + (e.stack||'').split('\n')[1]); }
+    if (token !== buildToken) { diag('⚠buildScene後にtoken変化'); return; }
   }
-  if (!usedReal) buildFallbackCity();
+  if (!usedReal) { buildFallbackCity(); diag('簡易都市にフォールバック'); }
 
   dd.className = usedReal ? 's-dot' : 's-dot warn';
   document.getElementById('data-lbl').textContent = usedReal ? '実データ' : '簡易';
@@ -1854,6 +1864,21 @@ async function fetchWorld(lat, lng) {
   fetchWeather(lat, lng);
   fetchWaze(lat, lng).then(function(ok){ if (ok) buildWazeLayer(token); });
 }
+
+let _diagLog = [];
+function diag(msg) {
+  const t = new Date().toLocaleTimeString('ja-JP', {hour12:false});
+  _diagLog.unshift(t + ' ' + msg);
+  if (_diagLog.length > 40) _diagLog.length = 40;
+  const el = document.getElementById('diag-panel');
+  if (el) el.textContent = _diagLog.join('\n');
+}
+window.addEventListener('error', function(e){
+  diag('❌ERR: ' + (e.message||'') + ' @' + (e.lineno||'?'));
+});
+window.addEventListener('unhandledrejection', function(e){
+  diag('❌REJECT: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
+});
 
 function showFetchIndicator(on) {
   document.getElementById('fetch-indicator').classList.toggle('show', !!on);
