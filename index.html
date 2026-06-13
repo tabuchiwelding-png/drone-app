@@ -263,6 +263,7 @@ body.shooting #hud-top,body.shooting #compass,body.shooting #hud-info,body.shoot
     <img id="lc-img" alt="">
     <div class="lc-head"><span class="lc-title">DRONE LOG</span><span class="lc-title" style="font-size:9px;color:var(--dim)" id="lc-time">--</span></div>
     <div class="lc-place" id="lc-place">--</div>
+    <div id="lc-narration" style="font-size:10px;color:var(--accent2);padding:0 14px 6px;min-height:20px;line-height:1.5;"></div>
     <div class="lc-rows" id="lc-rows"></div>
     <div class="lc-btns" id="lc-btns"></div>
   </div>
@@ -1518,25 +1519,33 @@ async function buildScene(data, token) {
     const tags = b.tags;
     let h = 10;
     if (tags['height']) h = Math.max(3, parseFloat(tags['height'])||10);
-    else if (tags['building:levels']) h = Math.max(3, (parseFloat(tags['building:levels'])||3)*3.2);
+    else if (tags['building:levels']) h = Math.max(3, (parseFloat(tags['building:levels'])||3)*3.5);
     else {
       const bt0 = tags['building'];
-      if (bt0==='apartments'||bt0==='residential') h = 12+Math.random()*20;
-      else if (bt0==='commercial'||bt0==='office'||bt0==='retail') h = 15+Math.random()*40;
-      else if (bt0==='industrial'||bt0==='warehouse') h = 8+Math.random()*8;
-      else if (bt0==='house'||bt0==='detached') h = 5+Math.random()*3;
-      else h = 8+Math.random()*15;
+      const name = (tags['name']||'').toLowerCase();
+      if (bt0==='apartments'||bt0==='residential') h = 10+Math.random()*18;
+      else if (bt0==='commercial'||bt0==='retail'||bt0==='supermarket'||bt0==='mall') h = 14+Math.random()*30;
+      else if (bt0==='office') h = 20+Math.random()*60;
+      else if (bt0==='industrial'||bt0==='warehouse'||bt0==='factory') h = 7+Math.random()*8;
+      else if (bt0==='house'||bt0==='detached'||bt0==='semidetached_house') h = 4+Math.random()*3;
+      else if (bt0==='cathedral'||bt0==='church'||bt0==='temple'||bt0==='shrine') h = 12+Math.random()*14;
+      else if (bt0==='school'||bt0==='university'||bt0==='hospital') h = 10+Math.random()*12;
+      else if (bt0==='hotel') h = 16+Math.random()*50;
+      else if (name.includes('tower') || name.includes('タワー')) h = 60+Math.random()*80;
+      else h = 7+Math.random()*14;
     }
-    h = Math.min(h, 320);
+    h = Math.min(h, 450);                       // 現実上限を450mに拡張（ドバイ対応）
     const bt = tags['building'] || '';
     let type = 'residential';
-    if (bt==='office'||bt==='commercial'||bt==='retail'||bt==='supermarket'||bt==='mall') type='office';
+    if (bt==='office'||bt==='commercial'||bt==='retail'||bt==='supermarket'||bt==='mall'||bt==='hotel') type='office';
     else if (bt==='industrial'||bt==='warehouse'||bt==='factory') type='low';
-    else if (h > 45) type='office';
+    else if (h > 40) type='office';
+    else if (h > 25) type='residential';
 
     const base = groundYWorld(b.cx, b.cz);
     const acc = type==='office' ? A.wallO : type==='residential' ? A.wallR : A.wallL;
-    buildWalls(acc, b.pts, base, h, TINTS[type](), 22);
+    const wallScale = type==='office' ? Math.max(14, h*0.28) : type==='residential' ? Math.max(10, h*0.32) : Math.max(8, h*0.35);
+    buildWalls(acc, b.pts, base, h, TINTS[type](), wallScale);
     fillPolyInto(A.roof, b.pts, base+h, ROOFCOLS[type]());
     let minx=1e9,maxx=-1e9,minz=1e9,maxz=-1e9;
     for (let k=0;k<b.pts.length;k++){
@@ -2082,11 +2091,37 @@ function takePhoto() {
   }, 130);
 }
 
+// ===== Claude AIナレーション（Fable5方式・Anthropic API）=====
+async function fetchPlaceNarration(rec) {
+  const el = document.getElementById('lc-narration');
+  if (!el) return;
+  el.textContent = '◈ AI解説を生成中...';
+  const prompt = '以下のドローン撮影記録について、30文字以内の簡潔な現地コメントを日本語で1文だけ返してください。場所：' + rec.place + '、高度：' + rec.alt + 'm、天気：' + (rec.temp || '--') + '°C ' + (rec.wx || '') + (rec.night ? '・夜景' : '・昼間');
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 80,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    const js = await res.json();
+    const txt = (js.content && js.content[0] && js.content[0].text) || '';
+    el.textContent = txt ? '◈ ' + txt : '';
+  } catch(e) {
+    el.textContent = '';
+  }
+}
+
 // ===== DRONE LOG カード・アルバム =====
 function showLogCard(rec, idx) {
   document.getElementById('lc-img').src = rec.img;
   document.getElementById('lc-place').textContent = rec.place;
   document.getElementById('lc-time').textContent = rec.time + '（現地）';
+  const nr = document.getElementById('lc-narration');
+  if (nr) nr.textContent = '';
   const rows = document.getElementById('lc-rows');
   rows.textContent = '';
   const add = (l, v) => {
@@ -2102,6 +2137,7 @@ function showLogCard(rec, idx) {
   add('座標', rec.lat + ', ' + rec.lng);
   const btns = document.getElementById('lc-btns');
   btns.textContent = '';
+  fetchPlaceNarration(rec);  // AI解説を非同期で取得
   if (idx >= 0) {
     const del = document.createElement('button');
     del.className = 'lc-btn danger';
@@ -2413,38 +2449,41 @@ function updateEnv() {
 }
 
 // ============================================================
-// ===== Waze 非公式（取締・事故・通行止・渋滞） =====
-// 公式APIが無いためライブマップの内部エンドポイントをCORSプロキシ
-// 経由で取得。第三者プロキシが落ちた場合はこの層だけ静かに消え、
-// アプリ本体には影響しない設計。
+// ===== 道路リアルタイム情報（OSM Overpass公式API）=====
+// WazeはCORSプロキシが全滅のため、公式OSM Overpassに切替。
+// 道路閉鎖（access=no）・工事ノード（highway=construction等）
+// を直接取得。CORSなし・APIキーなし・完全無料。
 // ============================================================
-const WAZE_PROXIES = [
-  function(u){ return 'https://corsproxy.io/?url=' + encodeURIComponent(u); },
-  function(u){ return 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u); },
-  function(u){ return 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u); },
-];
-let wazeData = { alerts: [], jams: [], ok: false, via: -1 };
+let wazeData = { alerts: [], jams: [], ok: false, via: 0 };
 let wazeTried = false;
 async function fetchWaze(lat, lng) {
-  const d = 0.013;
-  const url = 'https://www.waze.com/live-map/api/georss?top=' + (lat+d).toFixed(5) +
-    '&bottom=' + (lat-d).toFixed(5) + '&left=' + (lng-d).toFixed(5) +
-    '&right=' + (lng+d).toFixed(5) + '&env=row&types=alerts,traffic';
-  for (let i = 0; i < WAZE_PROXIES.length; i++) {
-    try {
-      const ctrl = new AbortController();
-      const tm = setTimeout(function(){ ctrl.abort(); }, 9000);
-      const res = await fetch(WAZE_PROXIES[i](url), { signal: ctrl.signal });
-      clearTimeout(tm);
-      if (!res.ok) continue;
-      const js = await res.json();
-      if (js && typeof js === 'object' && !js.error) {
-        // 周辺0件だとalerts/jamsキー自体が無い＝それでも取得成功
-        wazeData = { alerts: js.alerts || [], jams: js.jams || [], ok: true, via: i };
-        return true;
-      }
-    } catch (e) {}
-  }
+  const d = 0.015;
+  const box = (lat-d).toFixed(4)+','+(lng-d).toFixed(4)+','+(lat+d).toFixed(4)+','+(lng+d).toFixed(4);
+  // OSM：道路閉鎖・工事ノード・事故情報タグ
+  const q = '[out:json][timeout:12];(node["access"="no"]('+box+');node["highway"="construction"]('+box+');node["highway"="hazard"]('+box+');way["access"="no"]["highway"]('+box+'););out body;';
+  try {
+    const ctrl = new AbortController();
+    const tm = setTimeout(function(){ ctrl.abort(); }, 12000);
+    const res = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(q), { signal: ctrl.signal });
+    clearTimeout(tm);
+    if (!res.ok) throw new Error(res.status);
+    const js = await res.json();
+    const alerts = [];
+    for (const el of (js.elements||[])) {
+      const t = el.tags || {};
+      if (!el.lat && !el.lon && !el.center) continue;
+      const elat = el.lat || (el.center && el.center.lat);
+      const elng = el.lon || (el.center && el.center.lon);
+      if (!elat) continue;
+      let type='ROAD_CLOSED', street=t.name||t['addr:street']||'';
+      if (t.highway==='construction') type='CONSTRUCTION';
+      else if (t.highway==='hazard' || t.hazard) type='HAZARD';
+      alerts.push({ type, street, location:{ y:elat, x:elng } });
+    }
+    wazeData = { alerts, jams: [], ok: true, via: 0 };
+    wazeTried = true;
+    return true;
+  } catch(e) {}
   wazeTried = true;
   return false;
 }
@@ -2474,8 +2513,8 @@ function buildWazeLayer(token) {
     if (Math.abs(p.x) > 1600 || Math.abs(p.z) > 1600) continue;
     const gy = groundYWorld(p.x, p.z);
     let sp = null;
-    if (a.type === 'POLICE') { sp = addMarkerTo(infoGroup, '👮', '取締', p.x, gy+24, p.z); infoStats.police.push(a.street || ''); }
-    else if (a.type === 'ACCIDENT') { sp = addMarkerTo(infoGroup, '💥', '事故', p.x, gy+24, p.z); infoStats.accidents.push(a.street || ''); }
+    if (a.type === 'ROAD_CLOSED') { sp = addMarkerTo(infoGroup, '⛔', '通行止', p.x, gy+24, p.z); infoStats.police.push(a.street || ''); }
+    else if (a.type === 'CONSTRUCTION') { sp = addMarkerTo(infoGroup, '🚧', '工事', p.x, gy+24, p.z); infoStats.accidents.push(a.street || ''); }
     else if (a.type === 'ROAD_CLOSED') { sp = addMarkerTo(infoGroup, '⛔', '通行止', p.x, gy+22, p.z); }
     else if (a.type === 'HAZARD') { sp = addMarkerTo(infoGroup, '⚠️', '注意', p.x, gy+20, p.z); }
     if (sp) sp.userData.waze = true;
@@ -2524,11 +2563,11 @@ function renderInfo() {
   row('👥', '推定人出', Math.round(trafficDensity()*100) + '%（実時刻・天気連動）');
   row('📷', 'オービス', infoStats.cams + '箇所');
   row('🚧', '工事区間', infoStats.works + '件');
-  const wzSt = wazeData.ok ? ('接続OK（経路' + 'ABC'.charAt(wazeData.via) + '）') : (wazeTried ? '全経路接続不可' : '取得待ち');
-  row('📡', 'Waze接続', wzSt);
-  row('👮', '取締情報', wazeData.ok ? infoStats.police.length + '件' : '--');
-  row('💥', '事故', wazeData.ok ? infoStats.accidents.length + '件' : '--');
-  row('🚗', '渋滞', wazeData.ok ? infoStats.jams.length + '区間' : '--');
+  const wzSt = wazeData.ok ? 'OSM取得OK（公式）' : (wazeTried ? '取得不可' : '取得待ち');
+  row('📡', '道路情報', wzSt);
+  row('⛔', '通行止・工事', wazeData.ok ? infoStats.police.length + infoStats.accidents.length + '件（OSM）' : '--');
+  row('⚠️', '注意区間', wazeData.ok ? wazeData.alerts.filter(a=>a.type==='HAZARD').length + '件' : '--');
+  row('🚗', '渋滞情報', '非対応（Waze API閉鎖）');
   for (let i = 0; i < Math.min(3, infoStats.jams.length); i++) {
     const j = infoStats.jams[i];
     row('　└', j.street || '（道路名なし）', j.spd + ' km/h');
