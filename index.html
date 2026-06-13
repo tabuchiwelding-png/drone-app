@@ -4,27 +4,34 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>ドローン飛行</title>
-<script>const APP_VERSION = '15.0.0';</script>
+<script>const APP_VERSION = '16.0.0';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
 :root {
-  --accent: #00ffb4;
-  --accent2: #00ccff;
-  --dim: rgba(0,255,180,0.35);
-  --danger: #ff3b3b;
-  --warn: #ffaa00;
-  --panel: rgba(4,14,10,0.97);
-  --border: rgba(0,255,180,0.18);
-  --text: #d0fff0;
-  --font: 'Courier New', monospace;
+  --accent: #2effc6;
+  --accent2: #38bdf8;
+  --dim: rgba(160,200,190,0.5);
+  --danger: #ff4d4d;
+  --warn: #ffb020;
+  --panel: rgba(8,16,22,0.72);
+  --panel-solid: rgba(10,18,24,0.94);
+  --border: rgba(120,220,200,0.22);
+  --text: #e8f5f0;
+  /* UIはシステムフォント（高級感）／数値だけ等幅 */
+  --font: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Segoe UI', system-ui, sans-serif;
+  --mono: 'SF Mono', 'Roboto Mono', ui-monospace, monospace;
+  --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
-  --tab-h: calc(56px + var(--sab));
-  --joy-size: 96px;
-  --knob-size: 32px;
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --tab-h: calc(58px + var(--sab));
+  --joy-size: 104px;
+  --knob-size: 36px;
 }
 * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-family:var(--font); color:var(--text); touch-action:none; }
+html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-family:var(--font); color:var(--text); touch-action:none; -webkit-font-smoothing:antialiased; }
+.mono { font-family:var(--mono); font-variant-numeric:tabular-nums; }
 #canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
 
 /* ===== スキャンライン・クロスヘア ===== */
@@ -38,13 +45,15 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
 .bl{bottom:0;left:0;border-width:0 0 2px 2px}.br{bottom:0;right:0;border-width:0 2px 2px 0}
 
 /* ===== HUD ===== */
-#hud-top { position:fixed; top:0;left:0;right:0; padding:10px 14px 6px; display:flex; justify-content:space-between; z-index:30; background:linear-gradient(to bottom,rgba(0,0,0,0.82),transparent); pointer-events:none; }
-.hud-b { display:flex;flex-direction:column;gap:2px; }
-.hud-l { font-size:9px;color:var(--dim);letter-spacing:2px; }
-.hud-v { font-size:17px;color:var(--accent);font-weight:bold;text-shadow:0 0 10px var(--accent); }
+#hud-top { position:fixed; top:0;left:0;right:0; padding:calc(8px + var(--sat)) calc(16px + var(--sar)) 10px calc(16px + var(--sal)); display:flex; justify-content:space-between; align-items:flex-start; z-index:30; background:linear-gradient(to bottom,rgba(4,10,14,0.9) 0%,rgba(4,10,14,0.4) 60%,transparent 100%); pointer-events:none; }
+.hud-b { display:flex;flex-direction:column;gap:1px; }
+.hud-b.right{align-items:flex-end;}
+.hud-l { font-size:10px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase;font-weight:500; }
+.hud-v { font-size:26px;color:#fff;font-weight:700;line-height:1.05;font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-0.5px; }
+.hud-v .u{font-size:13px;color:var(--accent);font-weight:600;margin-left:3px;}
 .hud-v.warn{color:var(--warn)}
-#compass { position:fixed; top:58px; left:50%; transform:translateX(-50%); text-align:center; z-index:30; pointer-events:none; }
-#compass-dir { font-size:15px;color:var(--accent);display:block;text-shadow:0 0 8px var(--accent); }
+#compass { position:fixed; top:calc(56px + var(--sat)); left:50%; transform:translateX(-50%); text-align:center; z-index:30; pointer-events:none; }
+#compass-dir { font-size:18px;color:#fff;display:block;font-weight:600;letter-spacing:1px; }
 #coords-display { font-size:9px;color:var(--dim); }
 #env-display { font-size:10px;color:var(--accent2);display:block;margin-top:1px; }
 #pitch-indicator { position:fixed; right:14px; top:58%; transform:translateY(-50%); z-index:30; pointer-events:none; display:flex; flex-direction:column; align-items:center; gap:2px; }
@@ -54,21 +63,22 @@ html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-f
 #pitch-val { font-size:10px; color:var(--accent2); }
 
 /* ===== 左：速度モード ===== */
-#speed-mode { display:flex; gap:4px; align-items:center; }
-.spd-btn { background:rgba(0,0,0,0.4); border:1px solid var(--border); color:var(--dim); font-family:var(--font); font-size:9px; padding:4px 9px; cursor:pointer; min-height:36px; border-radius:3px; }
-.spd-btn.active { background:rgba(0,255,180,0.15); border-color:var(--accent); color:var(--accent); }
+#speed-mode { display:flex; gap:0; align-items:center; background:rgba(8,16,22,0.6); border:1px solid var(--border); border-radius:9px; padding:2px; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+.spd-btn { background:transparent; border:none; color:var(--dim); font-family:var(--font); font-size:11px; font-weight:600; padding:7px 11px; cursor:pointer; min-height:34px; border-radius:7px; transition:all 0.15s; }
+.spd-btn.active { background:var(--accent); color:#04140e; box-shadow:0 2px 8px rgba(46,255,198,0.35); }
 
 /* ===== 右：ツール列 ===== */
-#auto-btn { background:rgba(0,0,0,0.4); border:1px solid var(--border); color:var(--accent); font-family:var(--font); font-size:9px; padding:4px 9px; cursor:pointer; min-height:36px; border-radius:3px; flex-shrink:0; }
-#auto-btn.active{background:rgba(0,255,180,0.2);border-color:var(--accent);}
-#side-tools { position:fixed; top:178px; right:14px; z-index:35; display:flex; flex-direction:column; gap:6px; }
-.tool-btn { width:44px; height:44px; background:var(--panel); border:1px solid var(--border); color:var(--accent2); font-size:17px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-.tool-btn.active { background:rgba(0,204,255,0.18); border-color:var(--accent2); }
+#auto-btn { background:rgba(8,16,22,0.6); border:1px solid var(--border); color:var(--accent); font-family:var(--font); font-size:11px; font-weight:600; padding:8px 13px; cursor:pointer; min-height:38px; border-radius:9px; flex-shrink:0; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); transition:all 0.15s; }
+#auto-btn.active{background:var(--accent2);color:#04140e;border-color:var(--accent2);box-shadow:0 2px 8px rgba(56,189,248,0.4);}
+#side-tools { position:fixed; top:188px; right:calc(14px + var(--sar)); z-index:35; display:flex; flex-direction:column; gap:8px; }
+.tool-btn { width:46px; height:46px; background:rgba(8,16,22,0.62); border:1px solid var(--border); border-radius:13px; color:#fff; font-size:19px; cursor:pointer; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); transition:all 0.15s; }
+.tool-btn.active { background:rgba(56,189,248,0.22); border-color:var(--accent2); box-shadow:0 0 12px rgba(56,189,248,0.3); }
 
 /* ===== ミニマップ ===== */
-#minimap { position:fixed; right:14px; top:58px; z-index:35; width:112px; height:112px; border:1px solid var(--border); background:rgba(2,10,8,0.85); display:block; }
-#hud-info { position:fixed; left:14px; top:258px; z-index:30; pointer-events:none; background:rgba(2,12,9,0.66); border:1px solid var(--border); padding:7px 10px; font-size:10px; line-height:1.8; color:var(--text); max-width:178px; }
+#minimap { position:fixed; right:calc(14px + var(--sar)); top:calc(56px + var(--sat)); z-index:35; width:116px; height:116px; border:1px solid var(--border); border-radius:12px; background:rgba(4,12,16,0.8); display:block; box-shadow:0 4px 16px rgba(0,0,0,0.4); }
+#hud-info { position:fixed; left:calc(14px + var(--sal)); top:calc(186px + var(--sat)); z-index:30; pointer-events:none; background:rgba(8,16,22,0.62); border:1px solid var(--border); border-radius:12px; padding:9px 12px; font-size:11px; line-height:1.85; color:var(--text); max-width:190px; backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); box-shadow:0 4px 16px rgba(0,0,0,0.3); }
 #hud-info div { white-space:nowrap; }
+#hi-coords{font-family:var(--mono);font-size:10px;color:var(--dim);}
 #hi-env { color:var(--accent2); }
 #rain{position:fixed;inset:-60px 0 0 0;pointer-events:none;z-index:8;display:none;background:repeating-linear-gradient(78deg,transparent 0 7px,rgba(170,200,230,0.13) 7px 8px,transparent 8px 14px);animation:rainAnim 0.45s linear infinite;}
 #rain.snow{background:radial-gradient(circle at 12% 18%,rgba(240,248,255,0.5) 0 1.5px,transparent 2.5px),radial-gradient(circle at 55% 60%,rgba(240,248,255,0.4) 0 1.5px,transparent 2.5px),radial-gradient(circle at 82% 35%,rgba(240,248,255,0.45) 0 1.5px,transparent 2.5px);background-size:90px 90px,130px 130px,110px 110px;animation:snowAnim 4.5s linear infinite;}
@@ -88,9 +98,10 @@ body.shooting #hud-top,body.shooting #ctrl-speed-row,body.shooting #hud-info,bod
 #toast.show { opacity:1; }
 
 /* ===== タブバー・パネル ===== */
-#tabbar { position:fixed; bottom:0;left:0;right:0; height:var(--tab-h); padding-bottom:var(--sab); background:rgba(2,8,6,0.97); border-top:1px solid var(--border); display:flex; z-index:100; box-sizing:border-box; }
-.tab-btn { flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;border:none;background:none;color:var(--dim);font-family:var(--font);font-size:9px;padding-bottom:4px;min-height:44px; }
+#tabbar { position:fixed; bottom:0;left:0;right:0; height:var(--tab-h); padding-bottom:var(--sab); background:rgba(6,12,16,0.92); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border-top:1px solid var(--border); display:flex; z-index:100; box-sizing:border-box; }
+.tab-btn { flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;border:none;background:none;color:var(--dim);font-family:var(--font);font-size:10px;font-weight:500;padding-bottom:4px;min-height:44px;position:relative;transition:color 0.15s; }
 .tab-btn.active{color:var(--accent);}
+.tab-btn.active::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:28px;height:2.5px;background:var(--accent);border-radius:2px;box-shadow:0 0 8px var(--accent);}
 .tab-icon{font-size:20px;}
 .panel{position:fixed;bottom:var(--tab-h);left:0;right:0;background:var(--panel);border-top:1px solid var(--border);z-index:50;display:none;overflow-y:auto;max-height:72vh;}
 .panel.active{display:block;}
@@ -100,7 +111,7 @@ body.shooting #hud-top,body.shooting #ctrl-speed-row,body.shooting #hud-info,bod
 /* ===== 操作UI ===== */
 #fly-controls{position:fixed;bottom:var(--tab-h);left:0;right:0;padding:6px 12px 8px;background:linear-gradient(to top,rgba(0,0,0,0.94),transparent);z-index:40;}
 #ctrl-speed-row{display:flex;gap:6px;padding:5px 10px;align-items:center;border-bottom:1px solid rgba(0,255,180,0.1);}
-#status-row{display:flex;justify-content:flex-end;gap:10px;padding:3px 10px;}
+#status-row{display:flex;justify-content:flex-end;gap:12px;padding:4px 12px;font-family:var(--mono);}
 .s-item{display:flex;flex-direction:column;align-items:center;gap:2px;}
 .s-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);animation:blink 2s infinite;}
 .s-dot.warn{background:var(--warn);box-shadow:0 0 6px var(--warn);}
@@ -240,9 +251,9 @@ body.shooting #hud-top,body.shooting #compass,body.shooting #hud-info,body.shoot
 
 <!-- ===== HUD ===== -->
 <div id="hud-top">
-  <div class="hud-b"><span class="hud-l">対地高度</span><span class="hud-v" id="alt-display">60m</span></div>
-  <div class="hud-b" style="align-items:center"><span class="hud-l">◈ ドローン飛行</span><span class="hud-v" style="font-size:11px" id="mode-display">手動</span></div>
-  <div class="hud-b" style="align-items:flex-end"><span class="hud-l">速度</span><span class="hud-v" id="spd-display">0 km/h</span><span style="font-size:10px;color:var(--accent);letter-spacing:1px" id="ver-display">v12</span></div>
+  <div class="hud-b"><span class="hud-l">高度</span><span class="hud-v"><span id="hud-alt-num">60</span><span class="u">m</span></span></div>
+  <div class="hud-b" style="align-items:center"><span class="hud-l" id="mode-display">手動飛行</span></div>
+  <div class="hud-b right"><span class="hud-l">速度</span><span class="hud-v"><span id="spd-num">0</span><span class="u">km/h</span></span><span style="font-size:9px;color:var(--dim);letter-spacing:1px;margin-top:2px" id="ver-display">v16</span></div>
 </div>
 <div id="compass"><span id="compass-dir">北</span></div>
 <div id="hud-info">
@@ -372,7 +383,7 @@ body.shooting #hud-top,body.shooting #compass,body.shooting #hud-info,body.shoot
   <div class="set-item" onclick="toggleHudInfo()"><span class="set-t">📊 走行情報パネル</span><span class="set-sw" id="sw-hud"></span></div>
   <div class="set-item" onclick="toggleGyro()"><span class="set-t">📱 ジャイロ視点</span><span class="set-sw" id="sw-gyro"></span></div>
   <div class="set-item" onclick="toggleSound()"><span class="set-t">🔊 プロペラ音（速度連動）</span><span class="set-sw" id="sw-sound"></span></div>
-  <div class="set-ver">DRONE FLIGHT v15.0.0</div>
+  <div class="set-ver">DRONE FLIGHT v16.0.0</div>
   <div class="info-src">出典: OpenStreetMap / 国土地理院 / Open-Meteo（すべて公式API）<br>※通信機能（写真地面・建物・天気・道路情報）はGitHub Pages等のWebサーバー上でのみ動作します。ファイルの直接プレビューでは「簡易」モードになります。</div>
 </div>
 
@@ -1152,7 +1163,7 @@ async function buildGround(lat, lng, token) {
     tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
     const geo = new THREE.PlaneGeometry(w, d, 96, 96);
     geo.rotateX(-Math.PI/2);
-    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map:tex, color:0xffffff }));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map:tex }));  // 航空写真は陰影不要・常に鮮明
     mesh.position.set(pNW.x + w/2, 0, pNW.z + d/2);
     mesh.userData.ownTex = true;
     mesh.userData.ownMat = true;
@@ -1235,7 +1246,7 @@ async function buildDetail(lat, lng, token) {
     const tex = new THREE.CanvasTexture(cv);
     tex.encoding = THREE.sRGBEncoding;
     tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-    const mat = new THREE.MeshLambertMaterial({ map:tex, color: S.night ? 0x8088b8 : 0xffffff });
+    const mat = new THREE.MeshBasicMaterial({ map:tex, color: S.night ? 0x8088b8 : 0xffffff });
     const geo = new THREE.PlaneGeometry(w, d, 64, 64);
     geo.rotateX(-Math.PI/2);
     const mesh = new THREE.Mesh(geo, mat);
@@ -1526,12 +1537,12 @@ async function buildScene(data, token) {
       else if (bt0==='commercial'||bt0==='retail'||bt0==='supermarket'||bt0==='mall') h = 14+Math.random()*30;
       else if (bt0==='office') h = 20+Math.random()*60;
       else if (bt0==='industrial'||bt0==='warehouse'||bt0==='factory') h = 7+Math.random()*8;
-      else if (bt0==='house'||bt0==='detached'||bt0==='semidetached_house') h = 4+Math.random()*3;
+      else if (bt0==='house'||bt0==='detached'||bt0==='semidetached_house') h = 6+Math.random()*4;
       else if (bt0==='cathedral'||bt0==='church'||bt0==='temple'||bt0==='shrine') h = 12+Math.random()*14;
       else if (bt0==='school'||bt0==='university'||bt0==='hospital') h = 10+Math.random()*12;
       else if (bt0==='hotel') h = 16+Math.random()*50;
       else if (name.includes('tower') || name.includes('タワー')) h = 60+Math.random()*80;
-      else h = 7+Math.random()*14;
+      else h = 9+Math.random()*14;
     }
     h = Math.min(h, 450);                       // 現実上限を450mに拡張（ドバイ対応）
     const bt = tags['building'] || '';
@@ -2236,8 +2247,10 @@ function drawMinimap() {
 // ============================================================
 function updateHUD() {
   const rel = S.alt - S.droneGroundY;
-  document.getElementById('alt-num').textContent = Math.round(rel);
-  document.getElementById('spd-display').textContent = Math.round(S.speed * 3.6) + ' km/h';
+  const relR = Math.round(rel);
+  document.getElementById('alt-num').textContent = relR;
+  document.getElementById('hud-alt-num').textContent = relR;
+  document.getElementById('spd-num').textContent = Math.round(S.speed * 3.6);
   let h = ((S.heading % 360) + 360) % 360;
   document.getElementById('compass-dir').textContent = DIRS[Math.round(h / 45) % 8];
   const f = document.getElementById('pitch-fill');
@@ -2633,7 +2646,7 @@ function setSpeed(mode) {
 function toggleAuto() {
   S.autoFly = !S.autoFly;
   document.getElementById('auto-btn').classList.toggle('active', S.autoFly);
-  document.getElementById('mode-display').textContent = S.autoFly ? '自動' : '手動';
+  document.getElementById('mode-display').textContent = S.autoFly ? '自動飛行' : '手動飛行';
 }
 
 // ============================================================
