@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>ドローン飛行</title>
-<script>const APP_VERSION = '14.1.0';</script>
+<script>const APP_VERSION = '15.0.0';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
@@ -84,8 +84,6 @@ body.shooting #hud-top,body.shooting #ctrl-speed-row,body.shooting #hud-info,bod
 /* ===== インジケータ・トースト ===== */
 #fetch-indicator { position:fixed; top:106px; left:50%; transform:translateX(-50%); z-index:35; font-size:9px; color:var(--accent); opacity:0; transition:opacity 0.3s; pointer-events:none; background:rgba(0,10,8,0.8); padding:4px 12px; border:1px solid var(--border); }
 #fetch-indicator.show { opacity:1; }
-#diag-panel { position:fixed; bottom:200px; left:8px; z-index:60; font-size:9px; color:#0f0; background:rgba(0,0,0,0.82); padding:5px 8px; border:1px solid #0a4; max-width:240px; line-height:1.5; white-space:pre-wrap; font-family:monospace; pointer-events:auto; max-height:80px; overflow:hidden; }
-#diag-panel.big { max-height:60vh; overflow:auto; max-width:90vw; bottom:120px; }
 #toast { position:fixed; bottom:calc(var(--tab-h) + 190px); left:50%; transform:translateX(-50%); z-index:120; font-size:11px; color:var(--accent); background:rgba(0,14,10,0.92); border:1px solid var(--accent); padding:8px 18px; opacity:0; transition:opacity 0.3s; pointer-events:none; white-space:nowrap; max-width:92vw; overflow:hidden; }
 #toast.show { opacity:1; }
 
@@ -258,7 +256,6 @@ body.shooting #hud-top,body.shooting #compass,body.shooting #hud-info,body.shoot
   <span id="pitch-val">0°</span>
 </div>
 <div id="fetch-indicator">◈ データ更新中</div>
-<div id="diag-panel" onclick="this.classList.toggle('big')">診断: 起動待ち</div>
 <div id="toast"></div>
 <div id="flash"></div>
 <div id="logcard-overlay" onclick="if(event.target===this)closeLogCard()">
@@ -375,7 +372,7 @@ body.shooting #hud-top,body.shooting #compass,body.shooting #hud-info,body.shoot
   <div class="set-item" onclick="toggleHudInfo()"><span class="set-t">📊 走行情報パネル</span><span class="set-sw" id="sw-hud"></span></div>
   <div class="set-item" onclick="toggleGyro()"><span class="set-t">📱 ジャイロ視点</span><span class="set-sw" id="sw-gyro"></span></div>
   <div class="set-item" onclick="toggleSound()"><span class="set-t">🔊 プロペラ音（速度連動）</span><span class="set-sw" id="sw-sound"></span></div>
-  <div class="set-ver">DRONE FLIGHT v14.1.0</div>
+  <div class="set-ver">DRONE FLIGHT v15.0.0</div>
   <div class="info-src">出典: OpenStreetMap / 国土地理院 / Open-Meteo（すべて公式API）<br>※通信機能（写真地面・建物・天気・道路情報）はGitHub Pages等のWebサーバー上でのみ動作します。ファイルの直接プレビューでは「簡易」モードになります。</div>
 </div>
 
@@ -420,7 +417,7 @@ const MIN_REL_ALT = 2;
 const MAX_ALT = 2500;
 const CAM_PITCH_MIN = -80, CAM_PITCH_MAX = 60;
 const JOY_R = 32;
-const FETCH_RADIUS = 700;     // Overpass取得半径(m)
+const FETCH_RADIUS = 1100;    // Overpass取得半径(m)：建物が疎なエリアでも母数確保
 const REFETCH_DIST = 400;     // 再取得トリガー距離(m)
 const M_LAT = 111320;         // 1度あたりメートル(緯度)
 const PHOTO_Z = 17;           // 航空写真タイルズーム（z17×8×8=2048px）
@@ -1865,20 +1862,7 @@ async function fetchWorld(lat, lng) {
   fetchWaze(lat, lng).then(function(ok){ if (ok) buildWazeLayer(token); });
 }
 
-let _diagLog = [];
-function diag(msg) {
-  const t = new Date().toLocaleTimeString('ja-JP', {hour12:false});
-  _diagLog.unshift(t + ' ' + msg);
-  if (_diagLog.length > 40) _diagLog.length = 40;
-  const el = document.getElementById('diag-panel');
-  if (el) el.textContent = _diagLog.join('\n');
-}
-window.addEventListener('error', function(e){
-  diag('❌ERR: ' + (e.message||'') + ' @' + (e.lineno||'?'));
-});
-window.addEventListener('unhandledrejection', function(e){
-  diag('❌REJECT: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
-});
+function diag(){}  // 診断版で原因特定済み・本番では無効化
 
 function showFetchIndicator(on) {
   document.getElementById('fetch-indicator').classList.toggle('show', !!on);
