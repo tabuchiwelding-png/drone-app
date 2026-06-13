@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>ドローン飛行</title>
-<script>const APP_VERSION = '16.0.0';</script>
+<script>const APP_VERSION = '17.0.0';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
@@ -383,7 +383,7 @@ body.shooting #hud-top,body.shooting #compass,body.shooting #hud-info,body.shoot
   <div class="set-item" onclick="toggleHudInfo()"><span class="set-t">📊 走行情報パネル</span><span class="set-sw" id="sw-hud"></span></div>
   <div class="set-item" onclick="toggleGyro()"><span class="set-t">📱 ジャイロ視点</span><span class="set-sw" id="sw-gyro"></span></div>
   <div class="set-item" onclick="toggleSound()"><span class="set-t">🔊 プロペラ音（速度連動）</span><span class="set-sw" id="sw-sound"></span></div>
-  <div class="set-ver">DRONE FLIGHT v16.0.0</div>
+  <div class="set-ver">DRONE FLIGHT v17.0.0</div>
   <div class="info-src">出典: OpenStreetMap / 国土地理院 / Open-Meteo（すべて公式API）<br>※通信機能（写真地面・建物・天気・道路情報）はGitHub Pages等のWebサーバー上でのみ動作します。ファイルの直接プレビューでは「簡易」モードになります。</div>
 </div>
 
@@ -1058,6 +1058,57 @@ function fillPolyInto(A, pts, y, col) {
 }
 
 // ===== 建物：壁（外向き法線・周長UV） =====
+// ===== 屋上ディテール（陸屋根パラペット＋塔屋）でビルの個性を出す =====
+function addRoofDetail(A, pts, roofY, type, h, seed) {
+  // バウンディングボックス
+  let minx=1e9,maxx=-1e9,minz=1e9,maxz=-1e9;
+  for (let k=0;k<pts.length;k++){ const p=pts[k];
+    if(p.x<minx)minx=p.x; if(p.x>maxx)maxx=p.x; if(p.z<minz)minz=p.z; if(p.z>maxz)maxz=p.z; }
+  const w = maxx-minx, d = maxz-minz, cx=(minx+maxx)/2, cz=(minz+maxz)/2;
+  if (w < 3 || d < 3) return;
+  const rnd = (function(){ let s=seed%2147483647; if(s<=0)s+=2147483646; return function(){ s=s*16807%2147483647; return (s-1)/2147483646; }; })();
+  const box = (x0,z0,x1,z1,y0,y1,col) => {
+    const c=[col,col,col];
+    accQuad(A,[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0],[0,0,-1],[[0,0],[1,0],[1,1],[0,1]],c);
+    accQuad(A,[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1],[0,0,1],[[0,0],[1,0],[1,1],[0,1]],c);
+    accQuad(A,[x0,y0,z0],[x0,y0,z1],[x0,y1,z1],[x0,y1,z0],[-1,0,0],[[0,0],[1,0],[1,1],[0,1]],c);
+    accQuad(A,[x1,y0,z0],[x1,y0,z1],[x1,y1,z1],[x1,y1,z0],[1,0,0],[[0,0],[1,0],[1,1],[0,1]],c);
+    accQuad(A,[x0,y1,z0],[x1,y1,z0],[x1,y1,z1],[x0,y1,z1],[0,1,0],[[0,0],[1,0],[1,1],[0,1]],c);
+  };
+  if (type === 'office' && h > 24) {
+    // 高層：パラペット（縁）＋塔屋（エレベーター機械室）＋ヘリポート風
+    const pc = 0.28;
+    box(minx, minz, maxx, minz+0.6, roofY, roofY+1.6, pc);
+    box(minx, maxz-0.6, maxx, maxz, roofY, roofY+1.6, pc);
+    box(minx, minz, minx+0.6, maxz, roofY, roofY+1.6, pc);
+    box(maxx-0.6, minz, maxx, maxz, roofY, roofY+1.6, pc);
+    const tw = w*0.3, td = d*0.3;
+    box(cx-tw/2, cz-td/2, cx+tw/2, cz+td/2, roofY, roofY+2.5+rnd()*3, 0.3);
+    if (rnd() < 0.4) { // アンテナ
+      box(cx-0.25, cz-0.25, cx+0.25, cz+0.25, roofY+5, roofY+11+rnd()*8, 0.22); }
+  } else if (type === 'residential' && h > 14) {
+    // 中層住宅：屋上設備＋低パラペット
+    box(minx, minz, maxx, minz+0.4, roofY, roofY+1.0, 0.32);
+    box(minx, maxz-0.4, maxx, maxz, roofY, roofY+1.0, 0.32);
+    const bw=w*0.22, bd=d*0.22;
+    box(cx-bw, cz-bd, cx+bw, cz+bd, roofY, roofY+1.8+rnd()*1.5, 0.34);
+  } else if (type === 'low') {
+    // 低層：切妻屋根風の頂点（住宅街の三角屋根感）
+    if (w < 26 && d < 26 && rnd() < 0.7) {
+      const ridgeY = roofY + 1.5 + Math.min(w,d)*0.12;
+      const along = w >= d;
+      const col = 0.30+rnd()*0.06;
+      if (along) {
+        accQuad(A,[minx,roofY,minz],[maxx,roofY,minz],[maxx,ridgeY,cz],[minx,ridgeY,cz],[0,0.6,-0.8],[[0,0],[1,0],[1,1],[0,1]],[col,col*0.9,col*0.8]);
+        accQuad(A,[minx,roofY,maxz],[maxx,roofY,maxz],[maxx,ridgeY,cz],[minx,ridgeY,cz],[0,0.6,0.8],[[0,0],[1,0],[1,1],[0,1]],[col,col*0.9,col*0.8]);
+      } else {
+        accQuad(A,[minx,roofY,minz],[minx,roofY,maxz],[cx,ridgeY,maxz],[cx,ridgeY,minz],[-0.8,0.6,0],[[0,0],[1,0],[1,1],[0,1]],[col,col*0.9,col*0.8]);
+        accQuad(A,[maxx,roofY,minz],[maxx,roofY,maxz],[cx,ridgeY,maxz],[cx,ridgeY,minz],[0.8,0.6,0],[[0,0],[1,0],[1,1],[0,1]],[col,col*0.9,col*0.8]);
+      }
+    }
+  }
+}
+
 function buildWalls(A, pts, base, h, tint, texScale) {
   let cx=0, cz=0;
   for (let i=0;i<pts.length;i++){ cx+=pts[i].x; cz+=pts[i].z; }
@@ -1514,15 +1565,16 @@ async function buildScene(data, token) {
 
   // ---- 建物（分割構築） ----
   ind.textContent = '◈ 建物構築中 0/' + bInfos.length;
+  // グレーライン基調：青灰〜ガンメタ。彩度を抑えて上品に
   const TINTS = {
-    office:      function(){ const v=0.78+Math.random()*0.14; return [v*0.96, v*0.99, v*1.04]; },
-    residential: function(){ const v=0.80+Math.random()*0.14; return [v*1.04, v, v*0.92]; },
-    low:         function(){ const v=0.78+Math.random()*0.14; return [v, v*1.01, v*0.97]; },
+    office:      function(){ const v=0.62+Math.random()*0.16; return [v*0.94, v*0.98, v*1.06]; },  // 青灰ガラス
+    residential: function(){ const v=0.60+Math.random()*0.16; return [v*1.02, v*0.99, v*0.95]; },  // 暖灰
+    low:         function(){ const v=0.55+Math.random()*0.14; return [v*0.98, v*1.0, v*1.02]; },    // 濃灰
   };
   const ROOFCOLS = {
-    office:      function(){ const v=0.50+Math.random()*0.12; return [v, v*1.02, v*1.06]; },
-    residential: function(){ const v=0.55+Math.random()*0.12; return [v*1.05, v*0.95, v*0.85]; },
-    low:         function(){ const v=0.55+Math.random()*0.10; return [v, v, v*0.96]; },
+    office:      function(){ const v=0.32+Math.random()*0.10; return [v*0.95, v, v*1.1]; },   // 濃い青灰の陸屋根
+    residential: function(){ const v=0.36+Math.random()*0.10; return [v*1.05, v*0.96, v*0.88]; },
+    low:         function(){ const v=0.34+Math.random()*0.08; return [v, v, v*1.04]; },
   };
   for (let i=0; i<bInfos.length; i++) {
     const b = bInfos[i];
@@ -1558,6 +1610,7 @@ async function buildScene(data, token) {
     const wallScale = type==='office' ? 36 : type==='residential' ? 20 : 10;
     buildWalls(acc, b.pts, base, h, TINTS[type](), wallScale);
     fillPolyInto(A.roof, b.pts, base+h, ROOFCOLS[type]());
+    addRoofDetail(A.roof, b.pts, base+h, type, h, (i*2654435761) >>> 0);
     let minx=1e9,maxx=-1e9,minz=1e9,maxz=-1e9;
     for (let k=0;k<b.pts.length;k++){
       const p=b.pts[k];
