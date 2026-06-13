@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>ドローン飛行</title>
-<script>const APP_VERSION = '18.0.0';</script>
+<script>const APP_VERSION = '19.0.0';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
@@ -383,7 +383,7 @@ body.shooting #hud-top,body.shooting #compass,body.shooting #hud-info,body.shoot
   <div class="set-item" onclick="toggleHudInfo()"><span class="set-t">📊 走行情報パネル</span><span class="set-sw" id="sw-hud"></span></div>
   <div class="set-item" onclick="toggleGyro()"><span class="set-t">📱 ジャイロ視点</span><span class="set-sw" id="sw-gyro"></span></div>
   <div class="set-item" onclick="toggleSound()"><span class="set-t">🔊 プロペラ音（速度連動）</span><span class="set-sw" id="sw-sound"></span></div>
-  <div class="set-ver">DRONE FLIGHT v18.0.0</div>
+  <div class="set-ver">DRONE FLIGHT v19.0.0</div>
   <div class="info-src">出典: OpenStreetMap / 国土地理院 / Open-Meteo（すべて公式API）<br>※通信機能（写真地面・建物・天気・道路情報）はGitHub Pages等のWebサーバー上でのみ動作します。ファイルの直接プレビューでは「簡易」モードになります。</div>
 </div>
 
@@ -436,6 +436,8 @@ const DEM_Z = 14;             // 標高タイルズーム
 const DETAIL_Z = 18;          // 詳細地面ズーム（約46cm/px・国土地理院提供の最大）
 const DETAIL_REFRESH = 240;   // 詳細層の追従更新距離(m)
 const MAX_BUILDINGS = 1200;
+const UNIQUE_DIST = 600;      // この距離内の建物は1棟ごと固有テクスチャ
+const UNIQUE_MAX = 220;       // 固有ビルの最大数（GPU保護）
 const MAX_TREES = 160;
 const MAX_SIGNALS = 90;
 const MAX_LABELS = 25;
@@ -1013,6 +1015,7 @@ function disposeGroup(g) {
 }
 function clearWorld() {
   [groundGroup, flatGroup, waterGroup, buildGroup, treeGroup, labelGroup, infoGroup].forEach(disposeGroup);
+  clearUniqueBuildings();
 }
 
 // ============================================================
@@ -1123,6 +1126,101 @@ function addRoofDetail(A, pts, roofY, type, h, seed) {
       }
     }
   }
+}
+
+// ============================================================
+// ===== フルリアル：1棟ごと固有ファサード（近景LOD）=====
+// 建物の階数・幅から窓割りを計算し、その建物だけの専用テクスチャを生成
+// ============================================================
+const uniqueBuildGroup = new THREE.Group();
+scene.add(uniqueBuildGroup);
+let uniqueMats = [];   // 破棄管理
+function clearUniqueBuildings() {
+  for (let i = uniqueBuildGroup.children.length - 1; i >= 0; i--) {
+    const m = uniqueBuildGroup.children[i];
+    if (m.geometry) m.geometry.dispose();
+    uniqueBuildGroup.remove(m);
+  }
+  for (const mt of uniqueMats) { if (mt.map) mt.map.dispose(); mt.dispose(); }
+  uniqueMats = [];
+}
+// 用途別の固有ファサードを描く（階数・色・夜の点灯を建物ごとに変える）
+function makeUniqueFacade(type, floors, seed, night) {
+  const rnd = (function(){ let s=(seed%2147483647)||1; return ()=>{ s=s*16807%2147483647; return (s-1)/2147483646; }; })();
+  const cols = type==='office' ? (6+((rnd()*6)|0)) : type==='residential' ? (4+((rnd()*4)|0)) : (3+((rnd()*3)|0));
+  const cw = 32, chh = 26;                         // 1窓セルのpx
+  const cv = document.createElement('canvas');
+  cv.width = cols * cw; cv.height = Math.max(1, floors) * chh;
+  const ctx = cv.getContext('2d');
+  // 壁ベース色（用途で色相、建物ごとに明度差）
+  let baseHue, baseSat, baseLit;
+  if (type==='office')      { baseHue = 200+((rnd()*24)|0); baseSat = 12+((rnd()*14)|0); baseLit = 42+((rnd()*16)|0); }
+  else if (type==='residential') { baseHue = 28+((rnd()*18)|0); baseSat = 10+((rnd()*16)|0); baseLit = 56+((rnd()*16)|0); }
+  else                      { baseHue = 210; baseSat = 6+((rnd()*8)|0); baseLit = 38+((rnd()*14)|0); }
+  if (night) baseLit = Math.min(baseLit, 14);
+  ctx.fillStyle = 'hsl('+baseHue+','+baseSat+'%,'+baseLit+'%)';
+  ctx.fillRect(0,0,cv.width,cv.height);
+  // 窓
+  const litCol = () => night
+    ? 'rgb('+(210+(rnd()*45|0))+','+(198+(rnd()*45|0))+','+(140+(rnd()*70|0))+')'
+    : 'hsl('+(baseHue-6+(rnd()*14|0))+','+(40+(rnd()*25|0))+'%,'+(64+(rnd()*20|0))+'%)';
+  const darkCol = night ? 'rgb(14,20,30)' : 'hsl('+baseHue+',14%,'+Math.max(18,baseLit-18)+'%)';
+  const litRate = night ? (type==='office'?0.5:0.4) : 1;
+  const mgx = cw*0.18, mgy = chh*0.18;
+  for (let r=0; r<floors; r++) {
+    for (let c=0; c<cols; c++) {
+      const lit = night ? (rnd()<litRate) : true;
+      ctx.fillStyle = lit ? litCol() : darkCol;
+      ctx.fillRect(c*cw+mgx, r*chh+mgy, cw-2*mgx, chh-2*mgy);
+    }
+  }
+  // 低層は1階を店舗風に明るく
+  if (type==='low' && !night) {
+    ctx.fillStyle = 'hsl('+baseHue+',20%,72%)';
+    ctx.fillRect(0, cv.height-chh+2, cv.width, chh-4);
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+// 1棟を固有メッシュとして構築（壁＝専用テクスチャ、UVは階数に正規化）
+function buildUniqueBuilding(pts, base, h, type, floors, seed) {
+  const A = newAcc();
+  let cx=0, cz=0;
+  for (let i=0;i<pts.length;i++){ cx+=pts[i].x; cz+=pts[i].z; }
+  cx/=pts.length; cz/=pts.length;
+  let perim = 0;
+  for (let i=0; i<pts.length; i++) perim += Math.hypot(pts[(i+1)%pts.length].x-pts[i].x, pts[(i+1)%pts.length].z-pts[i].z);
+  const winW = 4.0;                                  // 窓1枚の実幅(m)目安
+  let acc = 0;
+  for (let i=0; i<pts.length; i++) {
+    const p = pts[i], q = pts[(i+1)%pts.length];
+    const dx=q.x-p.x, dz=q.z-p.z;
+    const len = Math.hypot(dx,dz);
+    if (len < 0.05) continue;
+    let nx = dz/len, nz = -dx/len;
+    const mx=(p.x+q.x)/2-cx, mz=(p.z+q.z)/2-cz;
+    if (nx*mx+nz*mz < 0) { nx=-nx; nz=-nz; }
+    const u0 = acc/winW, u1 = (acc+len)/winW;        // 横：窓幅で繰り返し
+    const v1 = floors;                                // 縦：階数ぶん
+    accQuad(A,
+      [p.x,base,p.z],[q.x,base,q.z],[q.x,base+h,q.z],[p.x,base+h,p.z],
+      [nx,0,nz], [[u0,0],[u1,0],[u1,v1],[u0,v1]], [1,1,1]);
+    acc += len;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(A.p,3));
+  geo.setAttribute('normal',   new THREE.Float32BufferAttribute(A.n,3));
+  geo.setAttribute('uv',       new THREE.Float32BufferAttribute(A.u,2));
+  const tex = makeUniqueFacade(type, floors, seed, S.night);
+  tex.repeat.set(1,1);
+  const mat = new THREE.MeshLambertMaterial({ map:tex });
+  if (S.night) { mat.emissive.setHex(0x9a8a66); mat.emissiveMap = tex; }
+  uniqueMats.push(mat);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.userData = { type, floors, seed };
+  uniqueBuildGroup.add(mesh);
 }
 
 function buildWalls(A, pts, base, h, tint, texScale) {
@@ -1621,14 +1719,26 @@ async function buildScene(data, token) {
     else if (h > 25) type='residential';
 
     const base = groundYWorld(b.cx, b.cz);
-    const variant = ((i * 2246822519) >>> 0) % NVAR;  // 建物ごとに固有バリアント
-    const accArr = type==='office' ? A.wallO : type==='residential' ? A.wallR : A.wallL;
-    const acc = accArr[variant];
-    // 窓テクスチャの実寸：office=11階分(階高3.3m)/residential=7階分(2.9m)/low=1棟分
-    const wallScale = type==='office' ? 36 : type==='residential' ? 20 : 10;
-    buildWalls(acc, b.pts, base, h, TINTS[type](), wallScale);
-    fillPolyInto(A.roof, b.pts, base+h, ROOFCOLS[type]());
-    addRoofDetail(A.roof, b.pts, base+h, type, h, (i*2654435761) >>> 0);
+    // 階数：用途別の階高から算出
+    const floorH = type==='office' ? 3.5 : type==='residential' ? 2.9 : 3.2;
+    const floors = Math.max(1, Math.round(h / floorH));
+    const seed = (i * 2654435761) >>> 0;
+    // 近景LOD：カメラ近傍は1棟ごと固有テクスチャ（フルリアル）
+    const distXZ = Math.hypot(b.cx, b.cz);  // fetch時カメラ=ORIGIN原点
+    const isNear = distXZ < UNIQUE_DIST && uniqueBuildGroup.children.length < UNIQUE_MAX;
+    if (isNear) {
+      buildUniqueBuilding(b.pts, base, h, type, floors, seed);
+      fillPolyInto(A.roof, b.pts, base+h, ROOFCOLS[type]());
+      addRoofDetail(A.roof, b.pts, base+h, type, h, seed);
+    } else {
+      const variant = (seed) % NVAR;
+      const accArr = type==='office' ? A.wallO : type==='residential' ? A.wallR : A.wallL;
+      const acc = accArr[variant];
+      const wallScale = type==='office' ? 36 : type==='residential' ? 20 : 10;
+      buildWalls(acc, b.pts, base, h, TINTS[type](), wallScale);
+      fillPolyInto(A.roof, b.pts, base+h, ROOFCOLS[type]());
+      addRoofDetail(A.roof, b.pts, base+h, type, h, seed);
+    }
     let minx=1e9,maxx=-1e9,minz=1e9,maxz=-1e9;
     for (let k=0;k<b.pts.length;k++){
       const p=b.pts[k];
@@ -2003,6 +2113,17 @@ function applyNight(on) {
       else { m.emissive.setHex(0x000000); m.emissiveMap = null; }
       m.needsUpdate = true;
     }
+  }
+  // 固有ビルの夜/昼テクスチャを作り直す
+  for (const mesh of uniqueBuildGroup.children) {
+    const ud = mesh.userData;
+    if (ud.type === undefined) continue;
+    const ntex = makeUniqueFacade(ud.type, ud.floors, ud.seed, S.night);
+    if (mesh.material.map) mesh.material.map.dispose();
+    mesh.material.map = ntex;
+    if (S.night) { mesh.material.emissive.setHex(0x9a8a66); mesh.material.emissiveMap = ntex; }
+    else { mesh.material.emissive.setHex(0x000000); mesh.material.emissiveMap = null; }
+    mesh.material.needsUpdate = true;
   }
   if (S.night) { signalMat.emissive.setHex(0xffffff); signalMat.emissiveMap = signalTex; }
   else { signalMat.emissive.setHex(0x000000); signalMat.emissiveMap = null; }
