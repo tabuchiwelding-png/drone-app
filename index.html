@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>ドローン飛行</title>
-<script>const APP_VERSION = '13.0.0';</script>
+<script>const APP_VERSION = '14.0.0';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 /* ===== CSS変数 ===== */
@@ -263,7 +263,6 @@ body.shooting #hud-top,body.shooting #compass,body.shooting #hud-info,body.shoot
     <img id="lc-img" alt="">
     <div class="lc-head"><span class="lc-title">DRONE LOG</span><span class="lc-title" style="font-size:9px;color:var(--dim)" id="lc-time">--</span></div>
     <div class="lc-place" id="lc-place">--</div>
-    <div id="lc-narration" style="font-size:10px;color:var(--accent2);padding:0 14px 6px;min-height:20px;line-height:1.5;"></div>
     <div class="lc-rows" id="lc-rows"></div>
     <div class="lc-btns" id="lc-btns"></div>
   </div>
@@ -359,7 +358,7 @@ body.shooting #hud-top,body.shooting #compass,body.shooting #hud-info,body.shoot
   <div class="panel-title">◈ 周辺リアルタイム情報</div>
   <div id="info-list"></div>
   <button class="fly-start-btn" style="margin-top:10px" onclick="refreshInfo()">↻ 情報を再取得</button>
-  <div class="info-src">出典: OpenStreetMap / 国土地理院 / Open-Meteo / Waze（非公式・取得不可時は非表示）<br>人・車の個体はシミュレーション。位置（道路・施設）と件数・密度は実データ。</div>
+  <div class="info-src">出典: OpenStreetMap（建物・道路・通行止・工事・オービス）/ 国土地理院（地形・航空写真）/ Open-Meteo（天気・現地時刻）— すべて公式API<br>人・車の個体はシミュレーション。位置（道路・施設）と件数・密度は実データ。</div>
 </div>
 
 <!-- ===== 設定パネル ===== -->
@@ -373,8 +372,8 @@ body.shooting #hud-top,body.shooting #compass,body.shooting #hud-info,body.shoot
   <div class="set-item" onclick="toggleHudInfo()"><span class="set-t">📊 走行情報パネル</span><span class="set-sw" id="sw-hud"></span></div>
   <div class="set-item" onclick="toggleGyro()"><span class="set-t">📱 ジャイロ視点</span><span class="set-sw" id="sw-gyro"></span></div>
   <div class="set-item" onclick="toggleSound()"><span class="set-t">🔊 プロペラ音（速度連動）</span><span class="set-sw" id="sw-sound"></span></div>
-  <div class="set-ver">DRONE FLIGHT v13.0.0</div>
-  <div class="info-src">出典: OpenStreetMap / 国土地理院 / Open-Meteo / Waze（非公式）<br>※通信機能（写真地面・建物・天気・Waze）はGitHub Pages等のWebサーバー上でのみ動作します。ファイルの直接プレビューでは「簡易」モードになります。</div>
+  <div class="set-ver">DRONE FLIGHT v14.0.0</div>
+  <div class="info-src">出典: OpenStreetMap / 国土地理院 / Open-Meteo（すべて公式API）<br>※通信機能（写真地面・建物・天気・道路情報）はGitHub Pages等のWebサーバー上でのみ動作します。ファイルの直接プレビューでは「簡易」モードになります。</div>
 </div>
 
 <!-- ===== ログパネル ===== -->
@@ -1544,7 +1543,8 @@ async function buildScene(data, token) {
 
     const base = groundYWorld(b.cx, b.cz);
     const acc = type==='office' ? A.wallO : type==='residential' ? A.wallR : A.wallL;
-    const wallScale = type==='office' ? Math.max(14, h*0.28) : type==='residential' ? Math.max(10, h*0.32) : Math.max(8, h*0.35);
+    // 窓テクスチャの実寸：office=11階分(階高3.3m)/residential=7階分(2.9m)/low=1棟分
+    const wallScale = type==='office' ? 36 : type==='residential' ? 20 : 10;
     buildWalls(acc, b.pts, base, h, TINTS[type](), wallScale);
     fillPolyInto(A.roof, b.pts, base+h, ROOFCOLS[type]());
     let minx=1e9,maxx=-1e9,minz=1e9,maxz=-1e9;
@@ -2091,37 +2091,11 @@ function takePhoto() {
   }, 130);
 }
 
-// ===== Claude AIナレーション（Fable5方式・Anthropic API）=====
-async function fetchPlaceNarration(rec) {
-  const el = document.getElementById('lc-narration');
-  if (!el) return;
-  el.textContent = '◈ AI解説を生成中...';
-  const prompt = '以下のドローン撮影記録について、30文字以内の簡潔な現地コメントを日本語で1文だけ返してください。場所：' + rec.place + '、高度：' + rec.alt + 'm、天気：' + (rec.temp || '--') + '°C ' + (rec.wx || '') + (rec.night ? '・夜景' : '・昼間');
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 80,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-    const js = await res.json();
-    const txt = (js.content && js.content[0] && js.content[0].text) || '';
-    el.textContent = txt ? '◈ ' + txt : '';
-  } catch(e) {
-    el.textContent = '';
-  }
-}
-
 // ===== DRONE LOG カード・アルバム =====
 function showLogCard(rec, idx) {
   document.getElementById('lc-img').src = rec.img;
   document.getElementById('lc-place').textContent = rec.place;
   document.getElementById('lc-time').textContent = rec.time + '（現地）';
-  const nr = document.getElementById('lc-narration');
-  if (nr) nr.textContent = '';
   const rows = document.getElementById('lc-rows');
   rows.textContent = '';
   const add = (l, v) => {
@@ -2137,7 +2111,6 @@ function showLogCard(rec, idx) {
   add('座標', rec.lat + ', ' + rec.lng);
   const btns = document.getElementById('lc-btns');
   btns.textContent = '';
-  fetchPlaceNarration(rec);  // AI解説を非同期で取得
   if (idx >= 0) {
     const del = document.createElement('button');
     del.className = 'lc-btn danger';
@@ -2444,8 +2417,8 @@ function updateEnv() {
   document.getElementById('hi-env').textContent =
     t + (envTemp === null ? '' : '  ' + envTemp.toFixed(1) + '°C') + (w ? ' ' + w : '');
   document.getElementById('hi-stat').textContent =
-    '👥' + Math.round(trafficDensity()*100) + '%　👮' + infoStats.police.length +
-    '　🚗' + infoStats.jams.length + '　📷' + infoStats.cams;
+    '👥' + Math.round(trafficDensity()*100) + '%　⛔' + infoStats.police.length +
+    '　🚧' + (infoStats.works + infoStats.accidents.length) + '　📷' + infoStats.cams;
 }
 
 // ============================================================
@@ -2460,7 +2433,7 @@ async function fetchWaze(lat, lng) {
   const d = 0.015;
   const box = (lat-d).toFixed(4)+','+(lng-d).toFixed(4)+','+(lat+d).toFixed(4)+','+(lng+d).toFixed(4);
   // OSM：道路閉鎖・工事ノード・事故情報タグ
-  const q = '[out:json][timeout:12];(node["access"="no"]('+box+');node["highway"="construction"]('+box+');node["highway"="hazard"]('+box+');way["access"="no"]["highway"]('+box+'););out body;';
+  const q = '[out:json][timeout:12];(node["access"="no"]('+box+');node["highway"="construction"]('+box+');node["highway"="hazard"]('+box+');way["access"="no"]["highway"]('+box+'););out center;';
   try {
     const ctrl = new AbortController();
     const tm = setTimeout(function(){ ctrl.abort(); }, 12000);
@@ -2515,7 +2488,6 @@ function buildWazeLayer(token) {
     let sp = null;
     if (a.type === 'ROAD_CLOSED') { sp = addMarkerTo(infoGroup, '⛔', '通行止', p.x, gy+24, p.z); infoStats.police.push(a.street || ''); }
     else if (a.type === 'CONSTRUCTION') { sp = addMarkerTo(infoGroup, '🚧', '工事', p.x, gy+24, p.z); infoStats.accidents.push(a.street || ''); }
-    else if (a.type === 'ROAD_CLOSED') { sp = addMarkerTo(infoGroup, '⛔', '通行止', p.x, gy+22, p.z); }
     else if (a.type === 'HAZARD') { sp = addMarkerTo(infoGroup, '⚠️', '注意', p.x, gy+20, p.z); }
     if (sp) sp.userData.waze = true;
   }
@@ -2562,7 +2534,7 @@ function renderInfo() {
   row('🌡', '気温・天気', envTemp === null ? '取得待ち' : envTemp.toFixed(1) + '°C ' + weatherIcon(envWeatherCode));
   row('👥', '推定人出', Math.round(trafficDensity()*100) + '%（実時刻・天気連動）');
   row('📷', 'オービス', infoStats.cams + '箇所');
-  row('🚧', '工事区間', infoStats.works + '件');
+  row('🚧', '工事区間', (infoStats.works + infoStats.accidents.length) + '件');
   const wzSt = wazeData.ok ? 'OSM取得OK（公式）' : (wazeTried ? '取得不可' : '取得待ち');
   row('📡', '道路情報', wzSt);
   row('⛔', '通行止・工事', wazeData.ok ? infoStats.police.length + infoStats.accidents.length + '件（OSM）' : '--');
@@ -3051,10 +3023,7 @@ async function init() {
   setInterval(saveStats, 60000);
   setInterval(() => fetchWeather(S.lat, S.lng), 600000);
   setInterval(() => { if (!S.isFetching && TRAF_PATHS.ped.length + TRAF_PATHS.car.length > 0) spawnTraffic(); }, 600000);
-  setInterval(() => {
-    if (S.isFetching) return;
-    fetchWaze(S.lat, S.lng).then(function(ok){ if (ok) buildWazeLayer(buildToken); });
-  }, 180000);
+
 }
 
 // ============================================================
