@@ -4,168 +4,278 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>ドローン飛行</title>
-<script>const APP_VERSION='N3.2.0';</script>
+<script>const APP_VERSION='CLEAN-4.0.0';</script>
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Cesium.js"></script>
 <link href="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <style>
 :root{
-  --accent:#2effc6; --accent2:#38bdf8; --dim:rgba(160,200,190,0.55);
-  --panel:rgba(8,16,22,0.78); --border:rgba(120,220,200,0.22); --text:#e8f5f0;
-  --font:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Segoe UI',system-ui,sans-serif;
-  --mono:'SF Mono','Roboto Mono',ui-monospace,monospace;
-  --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
-  --sal:env(safe-area-inset-left,0px); --sar:env(safe-area-inset-right,0px);
+  --bg:#071018;
+  --bg2:#0b1722;
+  --glass:rgba(8,18,28,.64);
+  --glass2:rgba(8,18,28,.82);
+  --line:rgba(205,235,255,.15);
+  --line2:rgba(46,255,198,.28);
+  --text:#eef8ff;
+  --muted:rgba(238,248,255,.62);
+  --weak:rgba(238,248,255,.38);
+  --accent:#2effc6;
+  --accent2:#38bdf8;
+  --warn:#ffcb6b;
+  --danger:#ff6978;
+  --shadow:0 18px 60px rgba(0,0,0,.35);
+  --radius:22px;
+  --font:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Hiragino Kaku Gothic ProN','Segoe UI',system-ui,sans-serif;
+  --mono:'SF Mono','Roboto Mono','Cascadia Mono',ui-monospace,monospace;
+  --sat:env(safe-area-inset-top,0px);
+  --sab:env(safe-area-inset-bottom,0px);
+  --sal:env(safe-area-inset-left,0px);
+  --sar:env(safe-area-inset-right,0px);
 }
-*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-html,body{width:100%;height:100%;overflow:hidden;background:#0a0e14;font-family:var(--font);color:var(--text);touch-action:none;-webkit-font-smoothing:antialiased;}
-#cesiumContainer{position:absolute;inset:0;}
-.cesium-viewer-bottom,.cesium-viewer-animationContainer,.cesium-viewer-timelineContainer,
-.cesium-viewer-toolbar,.cesium-viewer-fullscreenContainer,.cesium-viewer-geocoderContainer,
-.cesium-credit-lightbox,.cesium-credit-textContainer{display:none!important;}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{width:100%;height:100%;overflow:hidden;background:#05090d;color:var(--text);font-family:var(--font);touch-action:none;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+button,input{font:inherit;}
+button{cursor:pointer;color:inherit;}
+#cesiumContainer{position:fixed;inset:0;background:#05090d;}
+.cesium-viewer-bottom,.cesium-viewer-animationContainer,.cesium-viewer-timelineContainer,.cesium-viewer-toolbar,.cesium-viewer-fullscreenContainer,.cesium-viewer-geocoderContainer,.cesium-credit-lightbox,.cesium-credit-textContainer{display:none!important;}
+.cesium-widget-credits{display:none!important;}
 
-/* ===== 選択画面 ===== */
-#boot{position:fixed;inset:0;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:2000;gap:16px;}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:4;background:radial-gradient(circle at 50% 35%,transparent 0 48%,rgba(0,0,0,.18) 70%,rgba(0,0,0,.52) 100%);}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:5;background:linear-gradient(to bottom,rgba(4,10,16,.68),transparent 26%,transparent 66%,rgba(3,7,10,.78));}
+#crosshair{position:fixed;left:50%;top:50%;width:58px;height:58px;transform:translate(-50%,-50%);z-index:18;pointer-events:none;opacity:.72;filter:drop-shadow(0 0 8px rgba(46,255,198,.28));}
+#crosshair::before,#crosshair::after{content:"";position:absolute;background:rgba(46,255,198,.72);}
+#crosshair::before{left:0;right:0;top:50%;height:1px;}
+#crosshair::after{top:0;bottom:0;left:50%;width:1px;}
+.corner{position:absolute;width:13px;height:13px;border-color:rgba(46,255,198,.85);border-style:solid;}
+.corner.tl{left:0;top:0;border-width:2px 0 0 2px}.corner.tr{right:0;top:0;border-width:2px 2px 0 0}.corner.bl{left:0;bottom:0;border-width:0 0 2px 2px}.corner.br{right:0;bottom:0;border-width:0 2px 2px 0}
+
+/* 起動 */
+#boot{position:fixed;inset:0;z-index:3000;background:radial-gradient(circle at 50% 38%,#102335 0,#071018 48%,#020408 100%);display:flex;align-items:center;justify-content:center;padding:24px;}
 #boot.hide{display:none;}
-#boot h2{color:var(--accent);letter-spacing:6px;font-size:16px;text-shadow:0 0 20px var(--accent);font-weight:700;}
-#boot-ver{font-size:11px;color:var(--accent2);letter-spacing:3px;}
-.boot-bar{width:200px;height:2px;background:var(--border);border-radius:1px;overflow:hidden;}
-.boot-fill{height:100%;background:var(--accent);width:0;transition:width 0.4s ease;}
-#boot-status{font-size:11px;color:var(--accent2);letter-spacing:2px;min-height:18px;}
-#boot p{font-size:10px;color:var(--dim);letter-spacing:3px;}
-#picker{position:fixed;inset:0;z-index:1500;background:linear-gradient(160deg,#0a0e14,#0d1620);
-  display:flex;flex-direction:column;padding:calc(20px + var(--sat)) 20px calc(20px + var(--sab));overflow:hidden;}
-#picker h1{font-size:24px;font-weight:800;letter-spacing:2px;color:var(--accent);margin-bottom:2px;}
-#picker .sub{font-size:12px;color:var(--dim);margin-bottom:18px;}
-.pick-sec{font-size:11px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase;margin:14px 2px 8px;}
-#pref-view,#city-view{display:flex;flex-direction:column;height:100%;min-height:0;}
-.pick-head{font-size:13px;color:var(--text);letter-spacing:1px;margin:0 2px 12px;display:flex;align-items:center;gap:10px;flex:0 0 auto;}
-#back-pref{background:rgba(8,16,22,0.7);border:1px solid var(--border);border-radius:8px;color:var(--accent);font-size:13px;font-weight:600;padding:8px 14px;min-height:40px;}
-#city-head-name{color:var(--accent);font-weight:700;font-size:15px;}
-#pref-list,#city-list{display:flex;flex-wrap:wrap;gap:8px;overflow-y:auto;align-content:flex-start;flex:1 1 auto;min-height:0;padding-bottom:20px;-webkit-overflow-scrolling:touch;}
-.chip{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 14px;
-  font-size:14px;font-weight:600;color:var(--text);min-height:44px;display:flex;align-items:center;}
-.chip.active{background:var(--accent);color:#04140e;border-color:var(--accent);}
-#city-wrap{flex:1;display:flex;flex-direction:column;min-height:0;margin-top:6px;}
-#city-list{flex:1;}
-#picker .hint{font-size:11px;color:var(--dim);text-align:center;margin-top:10px;}
-#pick-status{font-size:12px;color:var(--accent);text-align:center;padding:8px;min-height:20px;flex:0 0 auto;}
+.boot-card{width:min(420px,92vw);border:1px solid var(--line);border-radius:28px;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.025));box-shadow:var(--shadow);padding:30px 24px;text-align:center;backdrop-filter:blur(22px);}
+.boot-mark{width:58px;height:58px;border-radius:20px;margin:0 auto 16px;display:grid;place-items:center;border:1px solid var(--line2);background:rgba(46,255,198,.08);box-shadow:0 0 28px rgba(46,255,198,.16);font-size:26px;}
+.boot-title{font-size:22px;font-weight:800;letter-spacing:.08em;margin-bottom:6px;}
+.boot-ver{font-family:var(--mono);font-size:11px;color:var(--accent2);letter-spacing:.16em;margin-bottom:20px;}
+.boot-bar{height:6px;border-radius:999px;background:rgba(255,255,255,.09);overflow:hidden;margin-bottom:14px;}
+.boot-fill{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:999px;transition:width .38s ease;}
+.boot-status{font-size:12px;color:var(--muted);letter-spacing:.08em;min-height:20px;}
 
-/* ===== ローディング ===== */
-#loading{position:fixed;inset:0;z-index:1400;background:#0a0e14;display:none;flex-direction:column;
-  align-items:center;justify-content:center;gap:16px;}
+/* 出発地選択 */
+#picker{position:fixed;inset:0;z-index:2400;display:none;flex-direction:column;background:radial-gradient(circle at 78% 6%,rgba(56,189,248,.16),transparent 34%),linear-gradient(160deg,#06101a,#101c27 55%,#071018);padding:calc(18px + var(--sat)) calc(16px + var(--sar)) calc(18px + var(--sab)) calc(16px + var(--sal));}
+.picker-shell{width:min(980px,100%);height:100%;margin:0 auto;display:flex;flex-direction:column;min-height:0;}
+.hero{display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:16px;}
+.brand-row{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.brand{display:flex;align-items:center;gap:12px;min-width:0;}
+.brand-icon{width:48px;height:48px;border-radius:17px;display:grid;place-items:center;background:rgba(46,255,198,.10);border:1px solid var(--line2);box-shadow:0 0 26px rgba(46,255,198,.12);font-size:22px;}
+.brand h1{font-size:24px;letter-spacing:.03em;line-height:1.12;}
+.brand p{font-size:12px;color:var(--muted);margin-top:3px;}
+.badge{font-family:var(--mono);font-size:11px;color:var(--accent);border:1px solid var(--line2);background:rgba(46,255,198,.08);border-radius:999px;padding:8px 10px;white-space:nowrap;}
+.search-panel{display:grid;grid-template-columns:1fr;gap:10px;padding:12px;border:1px solid var(--line);background:rgba(255,255,255,.045);border-radius:20px;backdrop-filter:blur(18px);}
+.search-input{width:100%;height:48px;border-radius:15px;border:1px solid var(--line);background:rgba(3,8,13,.52);color:var(--text);padding:0 14px;outline:none;}
+.search-input:focus{border-color:rgba(46,255,198,.7);box-shadow:0 0 0 3px rgba(46,255,198,.10);}
+.search-input::placeholder{color:var(--weak);}
+.quick-row{display:flex;gap:8px;overflow-x:auto;padding-bottom:1px;-webkit-overflow-scrolling:touch;}
+.quick{flex:0 0 auto;border:1px solid var(--line);background:rgba(255,255,255,.055);border-radius:999px;padding:10px 13px;font-size:12px;color:var(--muted);}
+.quick:active{transform:scale(.98);}
+.view{display:flex;flex-direction:column;min-height:0;flex:1;}
+.view-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:2px 2px 12px;}
+.view-title{font-size:13px;color:var(--muted);letter-spacing:.13em;text-transform:uppercase;}
+.view-count{font-family:var(--mono);font-size:12px;color:var(--accent2);}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(136px,1fr));gap:10px;overflow-y:auto;min-height:0;padding:2px 2px 20px;-webkit-overflow-scrolling:touch;}
+.card-btn{min-height:68px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.035));box-shadow:0 12px 30px rgba(0,0,0,.12);padding:12px;text-align:left;display:flex;flex-direction:column;justify-content:space-between;gap:8px;}
+.card-btn .name{font-size:15px;font-weight:750;line-height:1.2;}
+.card-btn .meta{font-size:11px;color:var(--muted);font-family:var(--mono);}
+.card-btn:hover,.card-btn:active{border-color:rgba(46,255,198,.55);background:rgba(46,255,198,.08);}
+.city-card{min-height:76px;}
+.city-card .meta{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.lod{color:var(--accent);}
+#back-pref{height:42px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.055);padding:0 14px;color:var(--text);}
+#city-head-name{font-size:18px;font-weight:800;color:var(--accent);}
+.status-line{font-size:12px;color:var(--muted);text-align:center;padding:10px 4px 0;min-height:30px;}
+
+/* 読み込み */
+#loading{position:fixed;inset:0;z-index:2200;display:none;align-items:center;justify-content:center;background:rgba(2,6,10,.72);backdrop-filter:blur(18px);padding:24px;}
 #loading.show{display:flex;}
-#loading .ttl{font-size:18px;font-weight:700;color:var(--accent);letter-spacing:1px;}
-#loading .sub{font-size:13px;color:var(--dim);white-space:pre-wrap;text-align:center;line-height:1.7;padding:0 30px;}
-.spin{width:38px;height:38px;border:3px solid rgba(46,255,198,0.2);border-top-color:var(--accent);border-radius:50%;animation:sp 0.9s linear infinite;}
-@keyframes sp{to{transform:rotate(360deg);}}
+.loading-card{width:min(420px,92vw);border:1px solid var(--line);border-radius:28px;background:rgba(8,18,28,.84);box-shadow:var(--shadow);padding:28px 22px;text-align:center;}
+.spinner{width:44px;height:44px;border-radius:50%;border:3px solid rgba(255,255,255,.10);border-top-color:var(--accent);margin:0 auto 16px;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.load-title{font-size:20px;font-weight:800;margin-bottom:8px;}
+.load-sub{font-size:13px;color:var(--muted);line-height:1.65;white-space:pre-wrap;}
 
-/* ===== HUD ===== */
-#hud-top{position:fixed;top:0;left:0;right:0;padding:calc(8px + var(--sat)) calc(16px + var(--sar)) 10px calc(16px + var(--sal));
-  display:flex;justify-content:space-between;align-items:flex-start;z-index:30;
-  background:linear-gradient(to bottom,rgba(4,10,14,0.9),rgba(4,10,14,0.35) 60%,transparent);pointer-events:none;}
-.hud-b{display:flex;flex-direction:column;gap:1px;}
-.hud-b.right{align-items:flex-end;}
-.hud-l{font-size:10px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase;font-weight:500;}
-.hud-v{font-size:26px;color:#fff;font-weight:700;line-height:1.05;font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-0.5px;}
-.hud-v .u{font-size:13px;color:var(--accent);font-weight:600;margin-left:3px;}
-#compass{position:fixed;top:calc(56px + var(--sat));left:50%;transform:translateX(-50%);z-index:30;pointer-events:none;text-align:center;}
-#compass-dir{font-size:18px;color:#fff;font-weight:600;letter-spacing:1px;}
-#place-name{position:fixed;top:calc(80px + var(--sat));left:50%;transform:translateX(-50%);z-index:30;pointer-events:none;font-size:12px;color:var(--accent);letter-spacing:1px;}
+/* HUD */
+#hud-top{position:fixed;top:0;left:0;right:0;z-index:30;display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:start;padding:calc(10px + var(--sat)) calc(12px + var(--sar)) 0 calc(12px + var(--sal));pointer-events:none;}
+.hud-card{min-width:96px;border:1px solid var(--line);border-radius:18px;background:rgba(8,18,28,.52);backdrop-filter:blur(14px);box-shadow:0 10px 30px rgba(0,0,0,.16);padding:10px 12px;}
+.hud-card.right{text-align:right;justify-self:end;}
+.hud-label{display:block;font-size:10px;color:var(--muted);letter-spacing:.16em;text-transform:uppercase;margin-bottom:2px;}
+.hud-value{font-family:var(--mono);font-size:25px;font-weight:800;line-height:1;color:white;}
+.hud-value .unit{font-size:12px;color:var(--accent);margin-left:3px;}
+.center-chip{align-self:start;text-align:center;border:1px solid var(--line);border-radius:999px;background:rgba(8,18,28,.48);padding:9px 14px;backdrop-filter:blur(14px);box-shadow:0 10px 30px rgba(0,0,0,.14);}
+#compass-dir{display:block;font-size:15px;font-weight:800;letter-spacing:.08em;}
+#place-name{display:block;margin-top:2px;max-width:46vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted);}
+#env-bar{position:fixed;top:calc(88px + var(--sat));left:50%;transform:translateX(-50%);z-index:30;display:flex;gap:12px;align-items:center;max-width:calc(100vw - 24px);overflow:hidden;white-space:nowrap;border:1px solid var(--line);border-radius:999px;background:rgba(8,18,28,.48);backdrop-filter:blur(14px);box-shadow:0 10px 30px rgba(0,0,0,.12);padding:7px 12px;font-family:var(--mono);font-size:11px;color:var(--muted);pointer-events:none;}
+#env-temp{color:var(--accent);}#env-coords{color:var(--weak);}
 
-/* ===== 操作 ===== */
-#controls{position:fixed;left:0;right:0;bottom:0;z-index:40;padding-bottom:calc(10px + var(--sab));}
-#speed-row{display:flex;justify-content:center;gap:10px;margin-bottom:14px;}
-#speed-mode{display:flex;gap:0;background:rgba(8,16,22,0.6);border:1px solid var(--border);border-radius:9px;padding:2px;backdrop-filter:blur(8px);}
-.spd-btn{background:transparent;border:none;color:var(--dim);font-family:var(--font);font-size:11px;font-weight:600;padding:7px 11px;border-radius:7px;}
-.spd-btn.active{background:var(--accent);color:#04140e;}
-#home-btn{background:rgba(8,16,22,0.6);border:1px solid var(--border);border-radius:9px;color:var(--accent2);font-size:11px;font-weight:600;padding:7px 13px;backdrop-filter:blur(8px);}
-.joys{display:flex;justify-content:space-between;align-items:center;padding:0 calc(20px + var(--sal)) 0 calc(20px + var(--sar));}
+/* 操作 */
+#controls{position:fixed;left:0;right:0;bottom:0;z-index:40;padding:0 calc(12px + var(--sar)) calc(10px + var(--sab)) calc(12px + var(--sal));display:none;}
+.control-card{width:min(720px,100%);margin:0 auto;border:1px solid var(--line);border-radius:26px;background:linear-gradient(180deg,rgba(8,18,28,.62),rgba(8,18,28,.88));box-shadow:var(--shadow);backdrop-filter:blur(18px);padding:10px 10px 12px;}
+.control-top{display:flex;align-items:center;gap:8px;margin-bottom:9px;}
+#speed-mode{display:flex;gap:4px;background:rgba(255,255,255,.055);border:1px solid var(--line);border-radius:15px;padding:3px;}
+.spd-btn{height:34px;border:0;background:transparent;color:var(--muted);border-radius:12px;padding:0 12px;font-size:12px;font-weight:700;}
+.spd-btn.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#031018;box-shadow:0 8px 18px rgba(46,255,198,.18);}
+.control-spacer{flex:1;}
+.icon-btn{height:40px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.055);padding:0 12px;font-size:12px;color:var(--muted);white-space:nowrap;}
+.icon-btn.primary{color:var(--accent);border-color:var(--line2);background:rgba(46,255,198,.08);}
+.control-grid{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;}
 .joy-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;}
-.joy-lbl{font-size:10px;color:var(--dim);letter-spacing:1px;}
-.joy{width:118px;height:118px;border-radius:50%;background:radial-gradient(circle,rgba(46,255,198,0.06),rgba(8,16,22,0.5));border:1.5px solid var(--border);position:relative;touch-action:none;}
-.joy.blue{background:radial-gradient(circle,rgba(56,189,248,0.06),rgba(8,16,22,0.5));}
-.knob{width:46px;height:46px;border-radius:50%;background:var(--accent);position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);box-shadow:0 0 16px rgba(46,255,198,0.5);}
-.knob.blue{background:var(--accent2);box-shadow:0 0 16px rgba(56,189,248,0.5);}
-.alt-col{display:flex;flex-direction:column;align-items:center;gap:8px;}
-.alt-btn{width:56px;height:46px;border-radius:12px;background:rgba(8,16,22,0.6);border:1px solid var(--border);color:var(--accent);font-size:22px;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);}
-.alt-val{font-size:18px;font-weight:700;color:#fff;font-family:var(--mono);}
-.alt-unit{font-size:10px;color:var(--dim);}
+.joy-label{font-size:10px;color:var(--muted);letter-spacing:.14em;text-transform:uppercase;}
+.joy{width:118px;height:118px;border-radius:50%;position:relative;border:1px solid var(--line2);background:radial-gradient(circle,rgba(46,255,198,.10),rgba(5,12,18,.72) 62%);box-shadow:inset 0 0 24px rgba(46,255,198,.08);touch-action:none;}
+.joy.blue{border-color:rgba(56,189,248,.35);background:radial-gradient(circle,rgba(56,189,248,.10),rgba(5,12,18,.72) 62%);}
+.joy::before,.joy::after{content:"";position:absolute;background:rgba(255,255,255,.10);}
+.joy::before{left:16px;right:16px;top:50%;height:1px}.joy::after{top:16px;bottom:16px;left:50%;width:1px}
+.knob{position:absolute;left:50%;top:50%;width:44px;height:44px;border-radius:50%;transform:translate(-50%,-50%);background:radial-gradient(circle at 35% 30%,#fff 0,#91ffe5 18%,var(--accent) 58%,#119b80 100%);box-shadow:0 0 22px rgba(46,255,198,.46);pointer-events:none;}
+.knob.blue{background:radial-gradient(circle at 35% 30%,#fff 0,#9ce9ff 18%,var(--accent2) 58%,#147aa2 100%);box-shadow:0 0 22px rgba(56,189,248,.46);}
+.alt-col{display:flex;flex-direction:column;align-items:center;gap:7px;min-width:70px;}
+.alt-btn{width:58px;height:46px;border-radius:16px;border:1px solid var(--line2);background:rgba(46,255,198,.08);color:var(--accent);font-size:20px;}
+.alt-read{font-family:var(--mono);font-size:20px;font-weight:800;color:white;line-height:1;}
+.alt-unit{font-size:10px;color:var(--weak);}
+#toast{position:fixed;left:50%;bottom:calc(206px + var(--sab));transform:translateX(-50%);z-index:2600;max-width:calc(100vw - 28px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid var(--line2);border-radius:999px;background:rgba(5,14,20,.9);box-shadow:0 16px 42px rgba(0,0,0,.28);padding:10px 15px;font-size:12px;color:var(--accent);opacity:0;pointer-events:none;transition:opacity .22s ease,transform .22s ease;}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(-4px);}
+
+@media (max-width:560px){
+  .brand h1{font-size:21px}.brand-icon{width:44px;height:44px}.badge{display:none}
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;}
+  #hud-top{grid-template-columns:1fr auto 1fr;gap:7px;}.hud-card{min-width:82px;padding:9px 10px}.hud-value{font-size:22px}.center-chip{padding:8px 10px}.joy{width:108px;height:108px}.knob{width:42px;height:42px}.control-grid{gap:6px}.control-card{border-radius:24px}.icon-btn{padding:0 9px}.spd-btn{padding:0 10px;}
+}
+@media (max-width:390px){.joy{width:100px;height:100px}.alt-btn{width:52px;height:42px}.control-top{gap:6px}.icon-btn{font-size:11px;padding:0 8px}.spd-btn{padding:0 8px}}
 </style>
 </head>
 <body>
 <div id="cesiumContainer"></div>
+<div id="crosshair"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span></div>
 
-<!-- 選択画面 -->
 <div id="boot">
-  <h2>&#9672; ドローン飛行</h2>
-  <div id="boot-ver">--</div>
-  <div class="boot-bar"><div class="boot-fill" id="boot-fill"></div></div>
-  <div id="boot-status">起動中...</div>
-  <p>実地形データを構築中</p>
-</div>
-
-<div id="picker" style="display:none">
-  <div id="pref-view">
-    <div class="pick-head">出発する都道府県</div>
-    <div id="pref-list"></div>
-    <div id="pick-status">整備都市を取得中...</div>
-  </div>
-  <div id="city-view" style="display:none">
-    <div class="pick-head"><button id="back-pref" onclick="backToPref()">‹ 都道府県</button><span id="city-head-name"></span></div>
-    <div id="city-list"></div>
+  <div class="boot-card">
+    <div class="boot-mark">◇</div>
+    <div class="boot-title">ドローン飛行</div>
+    <div class="boot-ver" id="boot-ver">--</div>
+    <div class="boot-bar"><div class="boot-fill" id="boot-fill"></div></div>
+    <div class="boot-status" id="boot-status">起動中...</div>
   </div>
 </div>
 
-<!-- ローディング -->
+<div id="picker">
+  <div class="picker-shell">
+    <section class="hero">
+      <div class="brand-row">
+        <div class="brand">
+          <div class="brand-icon">✈</div>
+          <div><h1>Real City Drone</h1><p>PLATEAU 3D都市モデルで飛ぶ。飾りではなく、実データ優先。</p></div>
+        </div>
+        <div class="badge" id="catalog-badge">読み込み中</div>
+      </div>
+      <div class="search-panel">
+        <input class="search-input" id="global-search" type="search" placeholder="都道府県・都市名で検索 例：岩手 / 盛岡 / 徳島 / 東京">
+        <div class="quick-row">
+          <button class="quick" onclick="quickLaunch('岩手','盛岡')">盛岡</button>
+          <button class="quick" onclick="quickLaunch('徳島','鳴門')">鳴門</button>
+          <button class="quick" onclick="quickLaunch('東京','新宿')">新宿</button>
+          <button class="quick" onclick="quickLaunch('大阪','大阪')">大阪</button>
+          <button class="quick" onclick="quickLaunch('京都','京都')">京都</button>
+          <button class="quick" onclick="quickLaunch('北海道','札幌')">札幌</button>
+        </div>
+      </div>
+    </section>
+
+    <div id="pref-view" class="view">
+      <div class="view-head"><span class="view-title">出発する都道府県</span><span class="view-count" id="pref-count">--</span></div>
+      <div id="pref-list" class="grid"></div>
+      <div class="status-line" id="pick-status">整備都市を取得中...</div>
+    </div>
+
+    <div id="city-view" class="view" style="display:none">
+      <div class="view-head">
+        <button id="back-pref" onclick="backToPref()">‹ 都道府県</button>
+        <span id="city-head-name">--</span>
+        <span class="view-count" id="city-count">--</span>
+      </div>
+      <input class="search-input" id="city-search" type="search" placeholder="この都道府県内で都市検索" style="margin-bottom:10px">
+      <div id="city-list" class="grid"></div>
+    </div>
+  </div>
+</div>
+
 <div id="loading">
-  <div class="ttl">接続中...</div>
-  <div class="spin"></div>
-  <div class="sub" id="load-sub">本物の街を読み込んでいます</div>
+  <div class="loading-card">
+    <div class="spinner"></div>
+    <div class="load-title">街を構築中</div>
+    <div class="load-sub" id="load-sub">3D都市モデルを読み込んでいます</div>
+  </div>
 </div>
 
-<!-- HUD -->
 <div id="hud-top">
-  <div class="hud-b"><span class="hud-l">高度</span><span class="hud-v"><span id="alt-num">300</span><span class="u">m</span></span></div>
-  <div class="hud-b" style="align-items:center"><span class="hud-l">ドローン</span></div>
-  <div class="hud-b right"><span class="hud-l">速度</span><span class="hud-v"><span id="spd-num">0</span><span class="u">km/h</span></span></div>
+  <div class="hud-card"><span class="hud-label">高度</span><span class="hud-value"><span id="alt-num">220</span><span class="unit">m</span></span></div>
+  <div class="center-chip"><span id="compass-dir">北</span><span id="place-name">出発地未選択</span></div>
+  <div class="hud-card right"><span class="hud-label">速度</span><span class="hud-value"><span id="spd-num">0</span><span class="unit">km/h</span></span></div>
 </div>
-<div id="compass"><span id="compass-dir">北</span></div>
-<div id="place-name"></div>
-<div id="env-bar" style="position:fixed;top:calc(100px + var(--sat));left:50%;transform:translateX(-50%);z-index:30;pointer-events:none;display:flex;gap:14px;font-family:var(--mono);font-size:12px;color:var(--text);background:rgba(8,16,22,0.5);padding:5px 12px;border-radius:8px;backdrop-filter:blur(6px);white-space:nowrap;"><span id="env-time">--:--</span><span id="env-temp" style="color:var(--accent)">--&#176;C</span><span id="env-coords" style="color:var(--dim)">--</span></div>
+<div id="env-bar"><span id="env-time">--:--</span><span id="env-temp">--°C</span><span id="env-coords">--</span></div>
 
-<!-- 操作 -->
-<div id="controls" style="display:none">
-  <div id="speed-row">
-    <div id="speed-mode">
-      <button class="spd-btn" id="spd-slow" onclick="setSpeed('slow')">低速</button>
-      <button class="spd-btn active" id="spd-mid" onclick="setSpeed('mid')">中速</button>
-      <button class="spd-btn" id="spd-fast" onclick="setSpeed('fast')">高速</button>
+<div id="controls">
+  <div class="control-card">
+    <div class="control-top">
+      <div id="speed-mode">
+        <button class="spd-btn" id="spd-slow" onclick="setSpeed('slow')">低速</button>
+        <button class="spd-btn active" id="spd-mid" onclick="setSpeed('mid')">中速</button>
+        <button class="spd-btn" id="spd-fast" onclick="setSpeed('fast')">高速</button>
+      </div>
+      <div class="control-spacer"></div>
+      <button class="icon-btn" id="snd-btn" onclick="toggleSound()">音OFF</button>
+      <button class="icon-btn primary" onclick="backToPicker()">街変更</button>
     </div>
-    <button id="snd-btn" onclick="toggleSound()" style="background:rgba(8,16,22,0.6);border:1px solid var(--border);border-radius:9px;color:var(--accent);font-size:11px;font-weight:600;padding:7px 13px;backdrop-filter:blur(8px);margin-right:8px;">&#128263; &#38899;OFF</button><button id="home-btn" onclick="backToPicker()">街を変える</button>
-  </div>
-  <div class="joys">
-    <div class="joy-wrap"><span class="joy-lbl">移動</span><div class="joy" id="joy-move"><div class="knob" id="knob-move"></div></div></div>
-    <div class="alt-col">
-      <button class="alt-btn" id="alt-up" ontouchstart="altHold(1)" ontouchend="altRelease()" onmousedown="altHold(1)" onmouseup="altRelease()">▲</button>
-      <span class="alt-val" id="alt-val2">300</span><span class="alt-unit">メートル</span>
-      <button class="alt-btn" id="alt-down" ontouchstart="altHold(-1)" ontouchend="altRelease()" onmousedown="altHold(-1)" onmouseup="altRelease()">▼</button>
+    <div class="control-grid">
+      <div class="joy-wrap"><span class="joy-label">移動</span><div class="joy" id="joy-move"><div class="knob" id="knob-move"></div></div></div>
+      <div class="alt-col">
+        <button class="alt-btn" id="alt-up" aria-label="高度上昇">▲</button>
+        <span class="alt-read" id="alt-val2">220</span><span class="alt-unit">meters</span>
+        <button class="alt-btn" id="alt-down" aria-label="高度下降">▼</button>
+      </div>
+      <div class="joy-wrap"><span class="joy-label" style="color:var(--accent2)">視点</span><div class="joy blue" id="joy-look"><div class="knob blue" id="knob-look"></div></div></div>
     </div>
-    <div class="joy-wrap"><span class="joy-lbl">視点</span><div class="joy blue" id="joy-look"><div class="knob blue" id="knob-look"></div></div></div>
   </div>
 </div>
+<div id="toast"></div>
 
 <script>
 // ============================================================
-// ===== 状態 =====
+// 状態
 // ============================================================
-const S = { lat:35.68, lng:139.76, alt:300, heading:0, pitch:-25, speedMode:'mid', vx:0, vz:0, dHeading:0, dPitch:0, altDir:0, speed:0, flying:false, groundH:0, soundOn:false };
-const SPEED = { slow:60, mid:160, fast:400 };
+const S = {
+  lat:35.681236, lng:139.767125, alt:220, groundH:0,
+  heading:0, pitch:-22, speedMode:'mid', vx:0, vz:0, dHeading:0, dPitch:0,
+  altDir:0, speed:0, flying:false, soundOn:false, sampling:false, lastGroundSample:0
+};
+const SPEED = { slow:55, mid:150, fast:330 }; // km/h
+const ALT_RATE = { slow:42, mid:82, fast:140 }; // m/s
 const DIRS = ['北','北東','東','南東','南','南西','西','北西'];
-let viewer, currentTileset=null, cityList=[], selectedPref=null;
+const MIN_REL_ALT = 18;
+const START_REL_ALT = 220;
+let viewer, currentTileset=null, allCities={}, selectedPref=null, cityFilter='';
 
 // ============================================================
-// ===== Cesium初期化 =====
+// Cesium初期化
 // ============================================================
+function showToast(msg, ms=2200){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  clearTimeout(showToast._timer);
+  showToast._timer=setTimeout(()=>t.classList.remove('show'), ms);
+}
+function bootProgress(pct,msg){
+  const f=document.getElementById('boot-fill'); if(f) f.style.width=pct+'%';
+  const s=document.getElementById('boot-status'); if(s && msg) s.textContent=msg;
+}
+function bootDone(){
+  document.getElementById('boot').classList.add('hide');
+  document.getElementById('picker').style.display='flex';
+}
 function gsiDemTerrain(){
   const TILE=256, GSI_MAX=14;
   const cv=document.createElement('canvas'); cv.width=TILE; cv.height=TILE;
@@ -201,42 +311,52 @@ function gsiDemTerrain(){
     }
   });
 }
-viewer = new Cesium.Viewer('cesiumContainer', {
-  baseLayer: new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
-    url:'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
-    maximumLevel:18, minimumLevel:2, credit:'地理院タイル'
-  }), {}),
-  terrainProvider: gsiDemTerrain(),
-  baseLayerPicker:false, geocoder:false, homeButton:false, sceneModePicker:false,
-  navigationHelpButton:false, animation:false, timeline:false, fullscreenButton:false,
-  infoBox:false, selectionIndicator:false,
-});
-viewer.scene.globe.depthTestAgainstTerrain = true;
-const ssc = viewer.scene.screenSpaceCameraController;
-ssc.enableRotate=false; ssc.enableTranslate=false; ssc.enableZoom=false; ssc.enableTilt=false; ssc.enableLook=false;
+function initCesium(){
+  if(!window.Cesium){ showToast('Cesiumの読み込みに失敗しました'); return; }
+  viewer = new Cesium.Viewer('cesiumContainer', {
+    baseLayer: new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
+      url:'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',
+      maximumLevel:18, minimumLevel:2, credit:'地理院タイル'
+    }), {}),
+    terrainProvider: gsiDemTerrain(),
+    baseLayerPicker:false, geocoder:false, homeButton:false, sceneModePicker:false,
+    navigationHelpButton:false, animation:false, timeline:false, fullscreenButton:false,
+    infoBox:false, selectionIndicator:false, shouldAnimate:true
+  });
+  viewer.scene.globe.depthTestAgainstTerrain = true;
+  viewer.scene.globe.maximumScreenSpaceError = 1.35;
+  viewer.scene.fog.enabled = true;
+  viewer.scene.fog.density = 0.00018;
+  viewer.scene.skyAtmosphere.show = true;
+  const ssc=viewer.scene.screenSpaceCameraController;
+  ssc.enableRotate=false; ssc.enableTranslate=false; ssc.enableZoom=false; ssc.enableTilt=false; ssc.enableLook=false;
+  applyCamera();
+}
 
-// ===== 気温・天気・現地時刻（Open-Meteo・v19移植）=====
+// ============================================================
+// 天気・音
+// ============================================================
 let envTemp=null, envUtcOffset=null, envWeatherCode=null;
 function localNow(){ return envUtcOffset===null ? new Date() : new Date(Date.now()+envUtcOffset*1000); }
 function localTimeStr(){
-  const d = envUtcOffset===null ? new Date() : localNow();
-  const h = envUtcOffset===null ? d.getHours() : d.getUTCHours();
-  const m = envUtcOffset===null ? d.getMinutes() : d.getUTCMinutes();
+  const d=localNow();
+  const h=envUtcOffset===null ? d.getHours() : d.getUTCHours();
+  const m=envUtcOffset===null ? d.getMinutes() : d.getUTCMinutes();
   return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
 }
 function weatherIcon(c){
   if(c===null) return '';
-  if(c<=1) return '\u2600'; if(c<=3) return '\u26C5'; if(c<=48) return '\uD83C\uDF2B';
-  if(c>=95) return '\u26A1'; if((c>=71&&c<=77)||c===85||c===86) return '\u2744';
-  if(c>=51) return '\u2614'; return '';
+  if(c<=1) return '☀'; if(c<=3) return '⛅'; if(c<=48) return '霧';
+  if(c>=95) return '雷'; if((c>=71&&c<=77)||c===85||c===86) return '雪';
+  if(c>=51) return '雨'; return '';
 }
 async function fetchWeather(lat,lng){
   try{
     const ctrl=new AbortController(); const tm=setTimeout(()=>ctrl.abort(),8000);
-    const res=await fetch('https://api.open-meteo.com/v1/forecast?latitude='+lat.toFixed(3)+'&longitude='+lng.toFixed(3)+'&current=temperature_2m,weather_code&timezone=auto',{signal:ctrl.signal});
-    clearTimeout(tm);
+    const url='https://api.open-meteo.com/v1/forecast?latitude='+lat.toFixed(3)+'&longitude='+lng.toFixed(3)+'&current=temperature_2m,weather_code&timezone=auto';
+    const res=await fetch(url,{signal:ctrl.signal}); clearTimeout(tm);
     const js=await res.json();
-    if(js&&js.current&&typeof js.current.temperature_2m==='number'){
+    if(js && js.current && typeof js.current.temperature_2m==='number'){
       envTemp=js.current.temperature_2m;
       if(typeof js.current.weather_code==='number') envWeatherCode=js.current.weather_code;
       if(typeof js.utc_offset_seconds==='number') envUtcOffset=js.utc_offset_seconds;
@@ -244,12 +364,10 @@ async function fetchWeather(lat,lng){
   }catch(e){}
 }
 function updateEnvBar(){
-  const et=document.getElementById('env-time'); if(!et) return;
-  et.textContent=localTimeStr();
-  document.getElementById('env-temp').textContent=(envTemp===null?'--':envTemp.toFixed(1))+'\u00B0C '+weatherIcon(envWeatherCode);
-  document.getElementById('env-coords').textContent=Math.abs(S.lat).toFixed(3)+(S.lat>=0?'N':'S')+' '+Math.abs(S.lng).toFixed(3)+(S.lng>=0?'E':'W');
+  document.getElementById('env-time').textContent=localTimeStr();
+  document.getElementById('env-temp').textContent=(envTemp===null?'--':envTemp.toFixed(1))+'°C '+weatherIcon(envWeatherCode);
+  document.getElementById('env-coords').textContent=Math.abs(S.lat).toFixed(4)+(S.lat>=0?'N':'S')+' '+Math.abs(S.lng).toFixed(4)+(S.lng>=0?'E':'W');
 }
-// ===== プロペラ音（Web Audio・v19移植）=====
 const AU={ctx:null,gain:null,lp:null};
 function initAudio(){
   if(AU.ctx) return true;
@@ -261,227 +379,267 @@ function initAudio(){
     const ch=buf.getChannelData(0); let last=0;
     for(let i=0;i<len;i++){ const w=Math.random()*2-1; last=(last+0.025*w)/1.025; ch[i]=last*4; }
     const src=AU.ctx.createBufferSource(); src.buffer=buf; src.loop=true;
-    AU.lp=AU.ctx.createBiquadFilter(); AU.lp.type='lowpass'; AU.lp.frequency.value=280; AU.lp.Q.value=1.2;
+    AU.lp=AU.ctx.createBiquadFilter(); AU.lp.type='lowpass'; AU.lp.frequency.value=300; AU.lp.Q.value=1.15;
     AU.gain=AU.ctx.createGain(); AU.gain.gain.value=0;
-    src.connect(AU.lp); AU.lp.connect(AU.gain); AU.gain.connect(AU.ctx.destination);
-    src.start(); return true;
+    src.connect(AU.lp); AU.lp.connect(AU.gain); AU.gain.connect(AU.ctx.destination); src.start();
+    return true;
   }catch(e){ return false; }
 }
 function toggleSound(){
   if(!S.soundOn){
-    if(!initAudio()){ return; }
+    if(!initAudio()){ showToast('この環境では音を開始できません'); return; }
     if(AU.ctx.state==='suspended') AU.ctx.resume();
-    S.soundOn=true;
-    document.getElementById('snd-btn').innerHTML='\uD83D\uDD0A \u97F3ON';
+    S.soundOn=true; document.getElementById('snd-btn').textContent='音ON';
   }else{
-    S.soundOn=false;
-    if(AU.gain) AU.gain.gain.value=0;
-    document.getElementById('snd-btn').innerHTML='\uD83D\uDD07 \u97F3OFF';
+    S.soundOn=false; if(AU.gain) AU.gain.gain.value=0; document.getElementById('snd-btn').textContent='音OFF';
   }
 }
 
 // ============================================================
-// ===== 全国エンジン：整備都市リスト取得 =====
+// 都市カタログ
 // ============================================================
-let allCities = {};
-// v19風起動画面の制御
-document.getElementById('boot-ver').textContent = 'VER ' + APP_VERSION;
-function bootProgress(pct, msg){
-  const f=document.getElementById('boot-fill'); if(f) f.style.width=pct+'%';
-  const s=document.getElementById('boot-status'); if(s&&msg) s.textContent=msg;
-}
-function bootDone(){
-  document.getElementById('boot').classList.add('hide');
-  document.getElementById('picker').style.display='flex';
-}
+document.getElementById('boot-ver').textContent='VER '+APP_VERSION;
+document.getElementById('global-search').addEventListener('input',()=>{ buildPrefList(); });
+document.getElementById('city-search').addEventListener('input',e=>{ cityFilter=e.target.value.trim(); buildCityList(); });
 (async function loadCatalog(){
-  bootProgress(15, '起動中...');
-  try {
-    bootProgress(40, '整備都市を取得中...');
-    const res = await fetch('https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets');
-    const data = await res.json();
-    bootProgress(70, '都市データを解析中...');
-    const blds = data.datasets.filter(d => d.type_en==='bldg' && d.format==='3D Tiles' && d.url);
-    const byCity = {};
-    for (const d of blds){
-      const key = d.pref + '|' + d.city;
-      const lod = parseInt(d.lod) || 1;
-      if (!byCity[key] || lod < byCity[key].lod){
-        byCity[key] = { pref:d.pref, city:d.city, url:d.url, lod:lod };
-      }
+  bootProgress(12,'エンジン起動中...');
+  initCesium();
+  try{
+    bootProgress(36,'PLATEAU都市カタログ取得中...');
+    const res=await fetch('https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets');
+    const data=await res.json();
+    bootProgress(68,'3D Tilesを整理中...');
+    const rows=(data.datasets||[]).filter(d=>d.type_en==='bldg' && d.format==='3D Tiles' && d.url && d.pref && d.city);
+    const byCity={};
+    for(const d of rows){
+      const key=d.pref+'|'+d.city;
+      const lod=parseInt(d.lod,10)||1;
+      if(!byCity[key] || lod < byCity[key].lod){ byCity[key]={pref:d.pref, city:d.city, url:d.url, lod:lod}; }
     }
-    allCities = {};
-    for (const k in byCity){
-      const c = byCity[k];
-      if (!allCities[c.pref]) allCities[c.pref] = [];
-      allCities[c.pref].push(c);
-    }
+    allCities={};
+    Object.values(byCity).forEach(c=>{ if(!allCities[c.pref]) allCities[c.pref]=[]; allCities[c.pref].push(c); });
+    Object.keys(allCities).forEach(p=>allCities[p].sort((a,b)=>a.city.localeCompare(b.city,'ja')));
+    const prefN=Object.keys(allCities).length, cityN=Object.keys(byCity).length;
+    document.getElementById('catalog-badge').textContent=prefN+'都道府県 / '+cityN+'都市';
+    document.getElementById('pick-status').textContent='出発地を選んでください。まず選択画面から迷子、アプリとしては正しい挙動です。';
     buildPrefList();
-    document.getElementById('pick-status').textContent =
-      Object.keys(allCities).length + '都道府県・' + Object.keys(byCity).length + '都市。出発地を選んでください';
-    bootProgress(100, '完了');
-    setTimeout(bootDone, 500);
-  } catch(e){
-    bootProgress(100, '取得エラー');
-    document.getElementById('pick-status').textContent = '取得エラー: ' + (e&&e.message?e.message:e);
-    setTimeout(bootDone, 500);
+    bootProgress(100,'完了');
+    setTimeout(bootDone,420);
+  }catch(e){
+    bootProgress(100,'取得エラー');
+    document.getElementById('catalog-badge').textContent='取得失敗';
+    document.getElementById('pick-status').textContent='PLATEAUカタログを取得できませんでした。通信環境かAPI側を確認してください。';
+    setTimeout(bootDone,420);
   }
 })();
-
+function norm(s){ return String(s||'').toLowerCase().replace(/\s+/g,''); }
+function getGlobalQuery(){ return norm(document.getElementById('global-search').value); }
 function buildPrefList(){
-  const wrap = document.getElementById('pref-list');
-  wrap.innerHTML='';
-  const prefs = Object.keys(allCities).sort((a,b)=> allCities[b].length - allCities[a].length);
-  for (const p of prefs){
-    const chip = document.createElement('div');
-    chip.className='chip'; chip.textContent = p + '（' + allCities[p].length + '）';
-    chip.onclick = ()=>selectPref(p, chip);
-    wrap.appendChild(chip);
+  const wrap=document.getElementById('pref-list'); wrap.innerHTML='';
+  const q=getGlobalQuery();
+  const prefs=Object.keys(allCities).sort((a,b)=>allCities[b].length-allCities[a].length);
+  let shown=0;
+  for(const p of prefs){
+    const cities=allCities[p]||[];
+    const hitPref=norm(p).includes(q);
+    const hitCity=cities.some(c=>norm(c.city).includes(q));
+    if(q && !hitPref && !hitCity) continue;
+    shown++;
+    const btn=document.createElement('button');
+    btn.className='card-btn';
+    btn.innerHTML='<span class="name">'+escapeHtml(p)+'</span><span class="meta">'+cities.length+' cities</span>';
+    btn.onclick=()=>selectPref(p);
+    wrap.appendChild(btn);
   }
+  document.getElementById('pref-count').textContent=shown+' / '+prefs.length;
 }
-function selectPref(pref, chip){
-  selectedPref = pref;
-  const wrap = document.getElementById('city-list');
-  wrap.innerHTML='';
-  const cities = allCities[pref].slice().sort((a,b)=>a.city.localeCompare(b.city,'ja'));
-  for (const c of cities){
-    const cc = document.createElement('div');
-    cc.className='chip'; cc.textContent = c.city;
-    cc.onclick = ()=>enterCity(c);
-    wrap.appendChild(cc);
-  }
-  document.getElementById('city-head-name').textContent = pref;
+function selectPref(pref){
+  selectedPref=pref; cityFilter='';
+  document.getElementById('city-search').value='';
+  document.getElementById('city-head-name').textContent=pref;
   document.getElementById('pref-view').style.display='none';
   document.getElementById('city-view').style.display='flex';
-  wrap.scrollTop = 0;
+  buildCityList();
 }
 function backToPref(){
   document.getElementById('city-view').style.display='none';
   document.getElementById('pref-view').style.display='flex';
 }
+function buildCityList(){
+  const wrap=document.getElementById('city-list'); wrap.innerHTML='';
+  const cities=selectedPref ? (allCities[selectedPref]||[]) : [];
+  const q=norm(cityFilter || document.getElementById('global-search').value);
+  let shown=0;
+  for(const c of cities){
+    if(q && !norm(c.city).includes(q) && !norm(c.pref).includes(q)) continue;
+    shown++;
+    const btn=document.createElement('button');
+    btn.className='card-btn city-card';
+    btn.innerHTML='<span class="name">'+escapeHtml(c.city)+'</span><span class="meta"><span>3D Tiles</span><span class="lod">LOD '+c.lod+'</span></span>';
+    btn.onclick=()=>enterCity(c);
+    wrap.appendChild(btn);
+  }
+  document.getElementById('city-count').textContent=shown+' / '+cities.length;
+}
+function quickLaunch(prefHint, cityHint){
+  const p=Object.keys(allCities).find(x=>norm(x).includes(norm(prefHint))) || Object.keys(allCities).find(x=>(allCities[x]||[]).some(c=>norm(c.city).includes(norm(cityHint))));
+  if(!p){ showToast('まだ都市カタログの取得中です'); return; }
+  const c=(allCities[p]||[]).find(x=>norm(x.city).includes(norm(cityHint))) || (allCities[p]||[])[0];
+  if(c) enterCity(c); else showToast(cityHint+' の3D都市データが見つかりません');
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
 
 // ============================================================
-// ===== 都市に入る =====
+// 都市に入る
 // ============================================================
-function enterCity(c){
+async function enterCity(c){
+  if(!viewer){ showToast('Cesiumがまだ準備できていません'); return; }
   document.getElementById('picker').style.display='none';
   document.getElementById('loading').classList.add('show');
-  document.getElementById('load-sub').textContent = c.pref + ' ' + c.city + ' の本物の街を読み込み中...\n（初回は数十秒かかることがあります）';
-  document.getElementById('place-name').textContent = c.pref + ' ' + c.city;
-
-  if (currentTileset){ viewer.scene.primitives.remove(currentTileset); currentTileset=null; }
-
-  Cesium.Cesium3DTileset.fromUrl(c.url, { maximumScreenSpaceError:16 }).then((ts)=>{
-    currentTileset = ts;
+  document.getElementById('load-sub').textContent=c.pref+' '+c.city+' の3D都市モデルを読み込み中...\n初回は数十秒かかることがあります。焦って連打すると、機械も困ります。';
+  document.getElementById('place-name').textContent=c.pref+' '+c.city;
+  S.flying=false;
+  try{
+    if(currentTileset){ viewer.scene.primitives.remove(currentTileset); currentTileset=null; }
+    const ts=await Cesium.Cesium3DTileset.fromUrl(c.url,{ maximumScreenSpaceError:10, dynamicScreenSpaceError:true, preloadWhenHidden:false });
+    currentTileset=ts;
     viewer.scene.primitives.add(ts);
-    const bs = ts.boundingSphere;
-    const carto = Cesium.Cartographic.fromCartesian(bs.center);
-    S.lat = Cesium.Math.toDegrees(carto.latitude);
-    S.lng = Cesium.Math.toDegrees(carto.longitude);
-    const go = ()=>{
-      document.getElementById('loading').classList.remove('show');
-      document.getElementById('controls').style.display='block';
-      S.heading=0; S.pitch=-25; S.flying=true;
-      fetchWeather(S.lat, S.lng);
-      applyCamera();
-      if(!S._loopStarted){ S._loopStarted=true; requestAnimationFrame(loop); }
-    };
-    Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, [Cesium.Cartographic.fromDegrees(S.lng,S.lat)]).then((r)=>{
-      S.groundH = (r&&r[0]&&isFinite(r[0].height))? r[0].height : 0;
-      S.alt = S.groundH + 300; go();
-    }).catch(()=>{ S.groundH=0; S.alt=300; go(); });
-  }).catch((e)=>{
-    document.getElementById('load-sub').textContent = '読込エラー: ' + (e&&e.message?e.message:e) + '\nこの都市のデータが取得できませんでした';
-  });
+    try{
+      ts.style=new Cesium.Cesium3DTileStyle({
+        color:{ conditions:[["true","color('white', 0.94)"]] }
+      });
+    }catch(e){}
+    const bs=ts.boundingSphere;
+    const carto=Cesium.Cartographic.fromCartesian(bs.center);
+    S.lat=Cesium.Math.toDegrees(carto.latitude);
+    S.lng=Cesium.Math.toDegrees(carto.longitude);
+    S.heading=0; S.pitch=-22;
+    await sampleGround(true);
+    S.alt=S.groundH+START_REL_ALT;
+    S.flying=true;
+    document.getElementById('loading').classList.remove('show');
+    document.getElementById('controls').style.display='block';
+    fetchWeather(S.lat,S.lng);
+    applyCamera(); updateHUD(); updateEnvBar();
+    if(!S._loopStarted){ S._loopStarted=true; lastT=performance.now(); requestAnimationFrame(loop); }
+    showToast(c.city+' から飛行開始');
+  }catch(e){
+    document.getElementById('load-sub').textContent='読込エラー: '+(e&&e.message?e.message:e)+'\n別の都市を選ぶか、少し待って再試行してください。';
+    setTimeout(()=>{ document.getElementById('loading').classList.remove('show'); document.getElementById('picker').style.display='flex'; },2600);
+  }
 }
-
 function backToPicker(){
   S.flying=false;
   document.getElementById('controls').style.display='none';
-  document.getElementById('place-name').textContent='';
+  document.getElementById('loading').classList.remove('show');
   document.getElementById('city-view').style.display='none';
   document.getElementById('pref-view').style.display='flex';
   document.getElementById('picker').style.display='flex';
 }
-
-// ============================================================
-// ===== カメラ反映 =====
-// ============================================================
-function applyCamera(){
-  viewer.camera.setView({
-    destination: Cesium.Cartesian3.fromDegrees(S.lng, S.lat, S.alt),
-    orientation: { heading:Cesium.Math.toRadians(S.heading), pitch:Cesium.Math.toRadians(S.pitch), roll:0 },
-  });
+async function sampleGround(force=false){
+  if(!viewer || S.sampling) return;
+  const now=performance.now();
+  if(!force && now-S.lastGroundSample<900) return;
+  S.sampling=true; S.lastGroundSample=now;
+  try{
+    const res=await Cesium.sampleTerrainMostDetailed(viewer.terrainProvider,[Cesium.Cartographic.fromDegrees(S.lng,S.lat)]);
+    const h=(res&&res[0]&&isFinite(res[0].height))?res[0].height:0;
+    S.groundH=h;
+    if(S.alt<S.groundH+MIN_REL_ALT) S.alt=S.groundH+MIN_REL_ALT;
+  }catch(e){} finally{ S.sampling=false; }
 }
 
 // ============================================================
-// ===== ループ =====
+// カメラ・飛行ループ
 // ============================================================
-let lastT = performance.now();
+function applyCamera(){
+  if(!viewer) return;
+  viewer.camera.setView({
+    destination:Cesium.Cartesian3.fromDegrees(S.lng,S.lat,S.alt),
+    orientation:{ heading:Cesium.Math.toRadians(S.heading), pitch:Cesium.Math.toRadians(S.pitch), roll:0 }
+  });
+}
+let lastT=performance.now();
 function loop(now){
-  const dt = Math.min(0.05,(now-lastT)/1000); lastT=now;
-  if (S.flying){
-    if (S.altDir!==0) S.alt = Math.max(S.groundH+10, Math.min(S.groundH+5000, S.alt + S.altDir*80*dt));
-    S.heading = (S.heading + S.dHeading*90*dt + 360)%360;
-    S.pitch = Math.max(-85, Math.min(10, S.pitch - S.dPitch*60*dt));
-    const mps = SPEED[S.speedMode]/3.6;
-    const mag = Math.hypot(S.vx,S.vz);
-    S.speed = mps*Math.min(1,mag);
-    if (mag>0.01){
-      const h = Cesium.Math.toRadians(S.heading);
-      const fwd=-S.vz, side=S.vx;
-      const north = Math.cos(h)*fwd - Math.sin(h)*side;
-      const east  = Math.sin(h)*fwd + Math.cos(h)*side;
-      const distM = mps*dt;
-      S.lat += (north*distM)/111320;
-      S.lng += (east*distM)/(111320*Math.cos(Cesium.Math.toRadians(S.lat)));
+  const dt=Math.min(.05,(now-lastT)/1000); lastT=now;
+  if(S.flying){
+    const relAlt=Math.max(MIN_REL_ALT,S.alt-S.groundH);
+    const altRate=ALT_RATE[S.speedMode]||ALT_RATE.mid;
+    if(S.altDir!==0) S.alt=Math.max(S.groundH+MIN_REL_ALT,Math.min(S.groundH+5000,S.alt+S.altDir*altRate*dt));
+    S.heading=(S.heading+S.dHeading*92*dt+360)%360;
+    S.pitch=Math.max(-82,Math.min(8,S.pitch-S.dPitch*58*dt));
+    const mag=Math.min(1,Math.hypot(S.vx,S.vz));
+    const mps=(SPEED[S.speedMode]||SPEED.mid)/3.6;
+    S.speed=mps*mag;
+    if(mag>.015){
+      const h=Cesium.Math.toRadians(S.heading);
+      const fwd=-S.vz/mag, side=S.vx/mag;
+      const north=Math.cos(h)*fwd-Math.sin(h)*side;
+      const east=Math.sin(h)*fwd+Math.cos(h)*side;
+      const dist=S.speed*dt;
+      S.lat+=(north*dist)/111320;
+      S.lng+=(east*dist)/(111320*Math.max(.15,Math.cos(Cesium.Math.toRadians(S.lat))));
     }
-    applyCamera();
-    updateHUD();
+    applyCamera(); updateHUD();
+    if(!S._groundTick || now-S._groundTick>1000){ S._groundTick=now; sampleGround(); }
+    if(!S._envTick || now-S._envTick>1000){ S._envTick=now; updateEnvBar(); }
+    if(!S._weatherTick || now-S._weatherTick>180000){ S._weatherTick=now; fetchWeather(S.lat,S.lng); }
     if(S.soundOn && AU.gain && AU.lp){
-      const relA=Math.max(0,S.alt-S.groundH);
-      AU.lp.frequency.value=240+S.speed*3.6*9+Math.min(200,relA*0.25);
-      AU.gain.gain.value=Math.min(0.13,0.045+S.speed*3.6*0.0014);
+      AU.lp.frequency.value=260+S.speed*3.6*7+Math.min(260,relAlt*.18);
+      AU.gain.gain.value=Math.min(.14,.038+S.speed*3.6*.0012);
     }
-    if(!S._envT||now-S._envT>1000){ S._envT=now; updateEnvBar(); }
   }
   requestAnimationFrame(loop);
 }
 function updateHUD(){
-  const a=Math.round(S.alt - S.groundH);
-  document.getElementById('alt-num').textContent=a;
-  document.getElementById('alt-val2').textContent=a;
+  const rel=Math.max(0,Math.round(S.alt-S.groundH));
+  document.getElementById('alt-num').textContent=rel;
+  document.getElementById('alt-val2').textContent=rel;
   document.getElementById('spd-num').textContent=Math.round(S.speed*3.6);
-  let h=((S.heading%360)+360)%360;
+  const h=((S.heading%360)+360)%360;
   document.getElementById('compass-dir').textContent=DIRS[Math.round(h/45)%8];
 }
+function setSpeed(m){
+  S.speedMode=m;
+  ['slow','mid','fast'].forEach(x=>document.getElementById('spd-'+x).classList.toggle('active',x===m));
+  showToast(m==='slow'?'低速モード':m==='mid'?'中速モード':'高速モード');
+}
 
-// ===== 速度・高度 =====
-function setSpeed(m){ S.speedMode=m; ['slow','mid','fast'].forEach(x=>document.getElementById('spd-'+x).classList.toggle('active',x===m)); }
-function altHold(d){ S.altDir=d; }
-function altRelease(){ S.altDir=0; }
-
-// ===== ジョイスティック =====
+// ============================================================
+// 操作系
+// ============================================================
+function setupButtonHold(el, down, up){
+  let active=false;
+  const start=e=>{ e.preventDefault(); active=true; down(); };
+  const end=e=>{ if(!active) return; e.preventDefault(); active=false; up(); };
+  el.addEventListener('pointerdown',start);
+  window.addEventListener('pointerup',end);
+  window.addEventListener('pointercancel',end);
+  el.addEventListener('contextmenu',e=>e.preventDefault());
+}
+setupButtonHold(document.getElementById('alt-up'),()=>S.altDir=1,()=>S.altDir=0);
+setupButtonHold(document.getElementById('alt-down'),()=>S.altDir=-1,()=>S.altDir=0);
 function setupJoy(padId,knobId,onMove){
-  const pad=document.getElementById(padId),knob=document.getElementById(knobId);
-  let active=false,id=null; const R=36;
-  function pos(t){
+  const pad=document.getElementById(padId), knob=document.getElementById(knobId);
+  const R=36; let active=false, pointerId=null;
+  function move(clientX,clientY){
     const r=pad.getBoundingClientRect();
-    let dx=t.clientX-(r.left+r.width/2), dy=t.clientY-(r.top+r.height/2);
-    const d=Math.hypot(dx,dy); if(d>R){dx=dx/d*R;dy=dy/d*R;}
-    knob.style.transform=`translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    let dx=clientX-(r.left+r.width/2), dy=clientY-(r.top+r.height/2);
+    const d=Math.hypot(dx,dy);
+    if(d>R){ dx=dx/d*R; dy=dy/d*R; }
+    knob.style.transform='translate(calc(-50% + '+dx+'px), calc(-50% + '+dy+'px))';
     onMove(dx/R,dy/R);
   }
   function reset(){ knob.style.transform='translate(-50%,-50%)'; onMove(0,0); }
-  pad.addEventListener('touchstart',e=>{e.preventDefault();active=true;id=e.changedTouches[0].identifier;pos(e.changedTouches[0]);},{passive:false});
-  pad.addEventListener('touchmove',e=>{if(!active)return;e.preventDefault();for(const t of e.changedTouches){if(t.identifier===id)pos(t);}},{passive:false});
-  pad.addEventListener('touchend',e=>{for(const t of e.changedTouches){if(t.identifier===id){active=false;reset();}}},{passive:false});
-  pad.addEventListener('mousedown',e=>{active=true;pos(e);});
-  window.addEventListener('mousemove',e=>{if(active)pos(e);});
-  window.addEventListener('mouseup',()=>{if(active){active=false;reset();}});
+  pad.addEventListener('pointerdown',e=>{ e.preventDefault(); active=true; pointerId=e.pointerId; pad.setPointerCapture(pointerId); move(e.clientX,e.clientY); });
+  pad.addEventListener('pointermove',e=>{ if(!active || e.pointerId!==pointerId) return; e.preventDefault(); move(e.clientX,e.clientY); });
+  function end(e){ if(!active || e.pointerId!==pointerId) return; active=false; pointerId=null; reset(); }
+  pad.addEventListener('pointerup',end); pad.addEventListener('pointercancel',end); pad.addEventListener('lostpointercapture',()=>{ if(active){ active=false; pointerId=null; reset(); } });
 }
 setupJoy('joy-move','knob-move',(x,y)=>{S.vx=x;S.vz=y;});
 setupJoy('joy-look','knob-look',(x,y)=>{S.dHeading=x;S.dPitch=y;});
+updateHUD(); updateEnvBar();
 </script>
 </body>
 </html>
+
