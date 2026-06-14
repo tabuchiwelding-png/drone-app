@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>ドローン飛行</title>
-<script>const APP_VERSION='N3.1.0';</script>
+<script>const APP_VERSION='N3.2.0';</script>
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Cesium.js"></script>
 <link href="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <style>
@@ -202,8 +202,10 @@ function gsiDemTerrain(){
   });
 }
 viewer = new Cesium.Viewer('cesiumContainer', {
-  baseLayer: Cesium.ImageryLayer.fromProviderAsync(
-    Cesium.ArcGisMapServerImageryProvider.fromUrl('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'), {}),
+  baseLayer: new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
+    url:'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
+    maximumLevel:18, minimumLevel:2, credit:'地理院タイル'
+  }), {}),
   terrainProvider: gsiDemTerrain(),
   baseLayerPicker:false, geocoder:false, homeButton:false, sceneModePicker:false,
   navigationHelpButton:false, animation:false, timeline:false, fullscreenButton:false,
