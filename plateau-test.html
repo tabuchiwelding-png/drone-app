@@ -3,80 +3,282 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>PLATEAU 新宿テスト</title>
-<!-- CesiumJS 静的ファイルの場所をCDNに向ける（import前に必須） -->
-<script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.122/Build/Cesium/';</script>
-<script src="https://cdn.jsdelivr.net/npm/cesium@1.122/Build/Cesium/Cesium.js"></script>
-<link href="https://cdn.jsdelivr.net/npm/cesium@1.122/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<title>ドローン飛行 PLATEAU</title>
+<script>const APP_VERSION='C1.0.0';</script>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <style>
-  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0a0e14;font-family:-apple-system,system-ui,sans-serif;}
-  #cesiumContainer{position:absolute;inset:0;}
-  /* Cesiumの不要UIを隠す（テストなので地球だけ見たい） */
-  .cesium-viewer-bottom,.cesium-viewer-animationContainer,.cesium-viewer-timelineContainer,
-  .cesium-viewer-toolbar,.cesium-viewer-fullscreenContainer,.cesium-viewer-geocoderContainer{display:none!important;}
-  #status{position:fixed;top:env(safe-area-inset-top,10px);left:10px;right:10px;z-index:999;
-    background:rgba(8,16,22,0.85);color:#2effc6;font-size:13px;line-height:1.7;padding:10px 14px;
-    border:1px solid rgba(120,220,200,0.3);border-radius:10px;white-space:pre-wrap;backdrop-filter:blur(8px);}
+/* ===== CSS変数 ===== */
+:root{
+  --accent:#2effc6; --accent2:#38bdf8; --dim:rgba(160,200,190,0.55);
+  --panel:rgba(8,16,22,0.72); --border:rgba(120,220,200,0.22); --text:#e8f5f0;
+  --font:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Segoe UI',system-ui,sans-serif;
+  --mono:'SF Mono','Roboto Mono',ui-monospace,monospace;
+  --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
+  --sal:env(safe-area-inset-left,0px); --sar:env(safe-area-inset-right,0px);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0e14;font-family:var(--font);color:var(--text);touch-action:none;-webkit-font-smoothing:antialiased;}
+#cesiumContainer{position:absolute;inset:0;}
+.cesium-viewer-bottom,.cesium-viewer-animationContainer,.cesium-viewer-timelineContainer,
+.cesium-viewer-toolbar,.cesium-viewer-fullscreenContainer,.cesium-viewer-geocoderContainer,
+.cesium-credit-lightbox,.cesium-credit-textContainer{display:none!important;}
+
+/* ===== ローディング ===== */
+#loading{position:fixed;inset:0;z-index:2000;background:#0a0e14;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:16px;}
+#loading .ttl{font-size:20px;font-weight:700;color:var(--accent);letter-spacing:1px;}
+#loading .sub{font-size:13px;color:var(--dim);white-space:pre-wrap;text-align:center;line-height:1.7;}
+#loading .ver{font-size:11px;color:var(--dim);font-family:var(--mono);}
+.spin{width:38px;height:38px;border:3px solid rgba(46,255,198,0.2);border-top-color:var(--accent);
+  border-radius:50%;animation:sp 0.9s linear infinite;}
+@keyframes sp{to{transform:rotate(360deg);}}
+
+/* ===== HUD上部 ===== */
+#hud-top{position:fixed;top:0;left:0;right:0;padding:calc(8px + var(--sat)) calc(16px + var(--sar)) 10px calc(16px + var(--sal));
+  display:flex;justify-content:space-between;align-items:flex-start;z-index:30;
+  background:linear-gradient(to bottom,rgba(4,10,14,0.9),rgba(4,10,14,0.35) 60%,transparent);pointer-events:none;}
+.hud-b{display:flex;flex-direction:column;gap:1px;}
+.hud-b.right{align-items:flex-end;}
+.hud-l{font-size:10px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase;font-weight:500;}
+.hud-v{font-size:26px;color:#fff;font-weight:700;line-height:1.05;font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-0.5px;}
+.hud-v .u{font-size:13px;color:var(--accent);font-weight:600;margin-left:3px;}
+#compass{position:fixed;top:calc(56px + var(--sat));left:50%;transform:translateX(-50%);z-index:30;pointer-events:none;text-align:center;}
+#compass-dir{font-size:18px;color:#fff;font-weight:600;letter-spacing:1px;}
+
+/* ===== 速度・ステータス ===== */
+#status-row{position:fixed;left:0;right:0;bottom:calc(220px + var(--sab));z-index:30;display:flex;
+  justify-content:center;gap:14px;font-family:var(--mono);font-size:11px;color:var(--dim);pointer-events:none;}
+.st-dot{display:flex;align-items:center;gap:4px;}
+.st-dot i{width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block;}
+
+/* ===== 操作系 ===== */
+#controls{position:fixed;left:0;right:0;bottom:0;z-index:40;padding-bottom:calc(10px + var(--sab));}
+#speed-row{display:flex;justify-content:center;gap:10px;margin-bottom:14px;}
+#speed-mode{display:flex;gap:0;background:rgba(8,16,22,0.6);border:1px solid var(--border);border-radius:9px;padding:2px;backdrop-filter:blur(8px);}
+.spd-btn{background:transparent;border:none;color:var(--dim);font-family:var(--font);font-size:11px;font-weight:600;padding:7px 11px;border-radius:7px;}
+.spd-btn.active{background:var(--accent);color:#04140e;}
+.joys{display:flex;justify-content:space-between;align-items:center;padding:0 calc(20px + var(--sal)) 0 calc(20px + var(--sar));}
+.joy-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;}
+.joy-lbl{font-size:10px;color:var(--dim);letter-spacing:1px;}
+.joy{width:120px;height:120px;border-radius:50%;background:radial-gradient(circle,rgba(46,255,198,0.06),rgba(8,16,22,0.5));
+  border:1.5px solid var(--border);position:relative;touch-action:none;}
+.joy.blue{background:radial-gradient(circle,rgba(56,189,248,0.06),rgba(8,16,22,0.5));}
+.knob{width:46px;height:46px;border-radius:50%;background:var(--accent);position:absolute;left:50%;top:50%;
+  transform:translate(-50%,-50%);box-shadow:0 0 16px rgba(46,255,198,0.5);transition:none;}
+.knob.blue{background:var(--accent2);box-shadow:0 0 16px rgba(56,189,248,0.5);}
+.alt-col{display:flex;flex-direction:column;align-items:center;gap:8px;}
+.alt-btn{width:58px;height:48px;border-radius:12px;background:rgba(8,16,22,0.6);border:1px solid var(--border);
+  color:var(--accent);font-size:22px;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);}
+.alt-val{font-size:20px;font-weight:700;color:#fff;font-family:var(--mono);}
+.alt-unit{font-size:10px;color:var(--dim);}
 </style>
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="status">起動中...</div>
+
+<!-- HUD -->
+<div id="hud-top">
+  <div class="hud-b"><span class="hud-l">高度</span><span class="hud-v"><span id="alt-num">150</span><span class="u">m</span></span></div>
+  <div class="hud-b" style="align-items:center"><span class="hud-l" id="mode-disp">手動飛行</span></div>
+  <div class="hud-b right"><span class="hud-l">速度</span><span class="hud-v"><span id="spd-num">0</span><span class="u">km/h</span></span></div>
+</div>
+<div id="compass"><span id="compass-dir">北</span></div>
+
+<div id="status-row">
+  <span class="st-dot"><i></i>PLATEAU</span>
+  <span class="st-dot"><i></i>東京</span>
+  <span class="st-dot"><i id="fps-dot"></i><span id="loc-name">丸の内</span></span>
+</div>
+
+<!-- 操作 -->
+<div id="controls">
+  <div id="speed-row">
+    <div id="speed-mode">
+      <button class="spd-btn" id="spd-slow" onclick="setSpeed('slow')">低速</button>
+      <button class="spd-btn active" id="spd-mid" onclick="setSpeed('mid')">中速</button>
+      <button class="spd-btn" id="spd-fast" onclick="setSpeed('fast')">高速</button>
+    </div>
+  </div>
+  <div class="joys">
+    <div class="joy-wrap">
+      <span class="joy-lbl">移動</span>
+      <div class="joy" id="joy-move"><div class="knob" id="knob-move"></div></div>
+    </div>
+    <div class="alt-col">
+      <button class="alt-btn" id="alt-up" ontouchstart="altHold(1)" ontouchend="altRelease()" onmousedown="altHold(1)" onmouseup="altRelease()">▲</button>
+      <span class="alt-val" id="alt-val2">150</span><span class="alt-unit">メートル</span>
+      <button class="alt-btn" id="alt-down" ontouchstart="altHold(-1)" ontouchend="altRelease()" onmousedown="altHold(-1)" onmouseup="altRelease()">▼</button>
+    </div>
+    <div class="joy-wrap">
+      <span class="joy-lbl">視点</span>
+      <div class="joy blue" id="joy-look"><div class="knob blue" id="knob-look"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ローディング -->
+<div id="loading">
+  <div class="ttl">DRONE FLIGHT</div>
+  <div class="spin"></div>
+  <div class="sub" id="load-sub">本物の東京を読み込み中...</div>
+  <div class="ver">PLATEAU × Cesium / v<span id="ver-txt"></span></div>
+</div>
+
 <script>
-const log = (m) => { document.getElementById('status').textContent = m; };
-(async function() {
-  try {
-    if (typeof Cesium === 'undefined') { log('❌ Cesium本体の読み込み失敗（CDN到達不可）'); return; }
-    log('Cesium読込OK。地球を生成中...');
+document.getElementById('ver-txt').textContent = APP_VERSION.replace('C','');
 
-    // Cesium ionトークン不要構成：地形は既定の楕円体、背景はOSMタイル（キー不要）
-    const viewer = new Cesium.Viewer('cesiumContainer', {
-      baseLayer: Cesium.ImageryLayer.fromProviderAsync(
-        Promise.resolve(new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' })), {}),
-      terrain: undefined,            // ion不要のため地形なし（テストでは平面でOK）
-      baseLayerPicker: false,
-      geocoder: false,
-      homeButton: false,
-      sceneModePicker: false,
-      navigationHelpButton: false,
-      animation: false,
-      timeline: false,
-      fullscreenButton: false,
-      infoBox: false,
-      selectionIndicator: false,
-    });
-    viewer.scene.globe.depthTestAgainstTerrain = false;
-    log('地球OK。PLATEAU新宿区の実建物を読み込み中...\n（初回は数十秒かかることがあります）');
+// ============================================================
+// ===== 状態 =====
+// ============================================================
+const S = {
+  lat: 35.6810, lng: 139.7670, alt: 150,   // 丸の内・東京駅周辺
+  heading: 0, pitch: -20,                    // 向き・見下ろし角(度)
+  speedMode: 'mid',
+  vx: 0, vz: 0,                              // 移動入力(-1..1)
+  dHeading: 0, dPitch: 0,                    // 視点入力
+  altDir: 0,                                 // 高度ボタン
+  speed: 0,
+};
+const SPEED = { slow: 40, mid: 110, fast: 260 };  // km/h相当
+const DIRS = ['北','北東','東','南東','南','南西','西','北西'];
 
-    // PLATEAU 新宿区 建築物モデル LOD2（テクスチャ付き）現行CDN（reearth）
-    const url = 'https://assets.cms.plateau.reearth.io/assets/ad/52340f-3f7f-470e-918e-38eb9c27e2db/13104_shinjuku-ku_pref_2023_citygml_2_op_bldg_3dtiles_13104_shinjuku-ku_lod2/tileset.json';
-    const tileset = await Cesium.Cesium3DTileset.fromUrl(url, { maximumScreenSpaceError: 16 });
-    viewer.scene.primitives.add(tileset);
+let viewer;
 
-    // 読み込めたら件数を表示
-    tileset.allTilesLoaded.addEventListener(() => {
-      log('✅ PLATEAU新宿区の実建物を表示しました\n本物の建物形状です（OSMの箱ではありません）\n指でドラッグ＝回転 / ピンチ＝ズーム');
-    });
+// ============================================================
+// ===== 初期化 =====
+// ============================================================
+(function init(){
+  if (typeof Cesium === 'undefined') { document.getElementById('load-sub').textContent='Cesium読込失敗'; return; }
+  viewer = new Cesium.Viewer('cesiumContainer', {
+    baseLayer: Cesium.ImageryLayer.fromProviderAsync(
+      Promise.resolve(new Cesium.OpenStreetMapImageryProvider({ url:'https://tile.openstreetmap.org/' })), {}),
+    baseLayerPicker:false, geocoder:false, homeButton:false, sceneModePicker:false,
+    navigationHelpButton:false, animation:false, timeline:false, fullscreenButton:false,
+    infoBox:false, selectionIndicator:false,
+  });
+  // 既定のマウス操作を無効化（自前操作のため）
+  const ssc = viewer.scene.screenSpaceCameraController;
+  ssc.enableRotate=false; ssc.enableTranslate=false; ssc.enableZoom=false; ssc.enableTilt=false; ssc.enableLook=false;
 
-    // 新宿駅上空へカメラを移動（実建物を斜め上から見る）
-    await viewer.flyTo(tileset, {
-      offset: new Cesium.HeadingPitchRange(
-        Cesium.Math.toRadians(0),
-        Cesium.Math.toRadians(-35),     // 斜め見下ろし
-        2500),                           // 距離2.5km
-      duration: 3,
-    });
-
-    setTimeout(() => {
-      if (document.getElementById('status').textContent.indexOf('✅') === -1) {
-        log('建物データ取得中... まだ出ない場合はPLATEAUサーバー側の遅延です\n少し待つか、ドラッグして視点を動かしてみてください');
-      }
-    }, 12000);
-
-  } catch (e) {
-    log('❌ エラー: ' + (e && e.message ? e.message : e) + '\nPLATEAU配信URLかネットワークの問題の可能性');
-  }
+  document.getElementById('load-sub').textContent='PLATEAU 千代田区の実建物を読込中...';
+  Cesium.Cesium3DTileset.fromUrl(
+    'https://assets.cms.plateau.reearth.io/assets/0e/e5948a-e95c-4e31-be85-1f8c066ed996/13101_chiyoda-ku_pref_2023_citygml_1_op_bldg_3dtiles_13101_chiyoda-ku_lod1/tileset.json'
+  ).then((ts)=>{
+    viewer.scene.primitives.add(ts);
+    document.getElementById('loading').style.display='none';
+    applyCamera();
+    requestAnimationFrame(loop);
+  }).catch((e)=>{
+    document.getElementById('load-sub').textContent='建物読込エラー: '+(e&&e.message?e.message:e);
+  });
 })();
+
+// ============================================================
+// ===== カメラ反映 =====
+// ============================================================
+function applyCamera(){
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(S.lng, S.lat, S.alt),
+    orientation: {
+      heading: Cesium.Math.toRadians(S.heading),
+      pitch: Cesium.Math.toRadians(S.pitch),
+      roll: 0,
+    },
+  });
+}
+
+// ============================================================
+// ===== メインループ =====
+// ============================================================
+let lastT = performance.now();
+function loop(now){
+  const dt = Math.min(0.05, (now - lastT)/1000); lastT = now;
+
+  // 高度
+  if (S.altDir !== 0){ S.alt = Math.max(20, Math.min(3000, S.alt + S.altDir * 60 * dt)); }
+
+  // 視点（右スティック）
+  S.heading = (S.heading + S.dHeading * 90 * dt + 360) % 360;
+  S.pitch = Math.max(-85, Math.min(10, S.pitch - S.dPitch * 60 * dt));
+
+  // 移動（左スティック）：機首方向に前後、横移動
+  const spdKmh = SPEED[S.speedMode];
+  const mps = spdKmh / 3.6;
+  const mag = Math.hypot(S.vx, S.vz);
+  S.speed = mps * Math.min(1, mag);
+  if (mag > 0.01){
+    const hRad = Cesium.Math.toRadians(S.heading);
+    // 前後(vz<0が前進)・左右(vx)
+    const fwd = -S.vz, side = S.vx;
+    // 北=+lat方向、東=+lng方向。heading0=北
+    const north = Math.cos(hRad)*fwd - Math.sin(hRad)*side;
+    const east  = Math.sin(hRad)*fwd + Math.cos(hRad)*side;
+    const distM = mps * dt;
+    const dLat = (north * distM) / 111320;
+    const dLng = (east  * distM) / (111320 * Math.cos(Cesium.Math.toRadians(S.lat)));
+    S.lat += dLat; S.lng += dLng;
+  }
+
+  applyCamera();
+  updateHUD();
+  requestAnimationFrame(loop);
+}
+
+// ============================================================
+// ===== HUD更新 =====
+// ============================================================
+function updateHUD(){
+  const a = Math.round(S.alt);
+  document.getElementById('alt-num').textContent = a;
+  document.getElementById('alt-val2').textContent = a;
+  document.getElementById('spd-num').textContent = Math.round(S.speed * 3.6);
+  let h = ((S.heading % 360)+360)%360;
+  document.getElementById('compass-dir').textContent = DIRS[Math.round(h/45)%8];
+}
+
+// ============================================================
+// ===== 速度切替 =====
+// ============================================================
+function setSpeed(m){
+  S.speedMode = m;
+  ['slow','mid','fast'].forEach(x=>document.getElementById('spd-'+x).classList.toggle('active', x===m));
+}
+
+// ============================================================
+// ===== 高度ボタン =====
+// ============================================================
+function altHold(d){ S.altDir = d; }
+function altRelease(){ S.altDir = 0; }
+
+// ============================================================
+// ===== ジョイスティック =====
+// ============================================================
+function setupJoy(padId, knobId, onMove){
+  const pad = document.getElementById(padId), knob = document.getElementById(knobId);
+  let active = false, id = null;
+  const R = 37;  // ノブ可動半径
+  function pos(t){
+    const r = pad.getBoundingClientRect();
+    let dx = t.clientX - (r.left + r.width/2);
+    let dy = t.clientY - (r.top + r.height/2);
+    const d = Math.hypot(dx,dy);
+    if (d > R){ dx = dx/d*R; dy = dy/d*R; }
+    knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    onMove(dx/R, dy/R);
+  }
+  function reset(){ knob.style.transform='translate(-50%,-50%)'; onMove(0,0); }
+  pad.addEventListener('touchstart', e=>{ e.preventDefault(); active=true; id=e.changedTouches[0].identifier; pos(e.changedTouches[0]); }, {passive:false});
+  pad.addEventListener('touchmove', e=>{ if(!active)return; e.preventDefault();
+    for(const t of e.changedTouches){ if(t.identifier===id){ pos(t); } } }, {passive:false});
+  pad.addEventListener('touchend', e=>{ for(const t of e.changedTouches){ if(t.identifier===id){ active=false; reset(); } } }, {passive:false});
+  // マウス（PC確認用）
+  pad.addEventListener('mousedown', e=>{ active=true; pos(e); });
+  window.addEventListener('mousemove', e=>{ if(active) pos(e); });
+  window.addEventListener('mouseup', ()=>{ if(active){ active=false; reset(); } });
+}
+setupJoy('joy-move','knob-move',(x,y)=>{ S.vx=x; S.vz=y; });
+setupJoy('joy-look','knob-look',(x,y)=>{ S.dHeading=x; S.dPitch=y; });
 </script>
 </body>
 </html>
