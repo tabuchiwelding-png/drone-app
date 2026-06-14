@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>パラレル日本</title>
-<script>const APP_VERSION='N3.0.0';</script>
+<title>ドローン飛行</title>
+<script>const APP_VERSION='N3.1.0';</script>
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Cesium.js"></script>
 <link href="https://cesium.com/downloads/cesiumjs/releases/1.117/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <style>
@@ -37,14 +37,18 @@ html,body{width:100%;height:100%;overflow:hidden;background:#0a0e14;font-family:
 #picker h1{font-size:24px;font-weight:800;letter-spacing:2px;color:var(--accent);margin-bottom:2px;}
 #picker .sub{font-size:12px;color:var(--dim);margin-bottom:18px;}
 .pick-sec{font-size:11px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase;margin:14px 2px 8px;}
-#pref-list,#city-list{display:flex;flex-wrap:wrap;gap:8px;overflow-y:auto;align-content:flex-start;}
+#pref-view,#city-view{display:flex;flex-direction:column;height:100%;min-height:0;}
+.pick-head{font-size:13px;color:var(--text);letter-spacing:1px;margin:0 2px 12px;display:flex;align-items:center;gap:10px;flex:0 0 auto;}
+#back-pref{background:rgba(8,16,22,0.7);border:1px solid var(--border);border-radius:8px;color:var(--accent);font-size:13px;font-weight:600;padding:8px 14px;min-height:40px;}
+#city-head-name{color:var(--accent);font-weight:700;font-size:15px;}
+#pref-list,#city-list{display:flex;flex-wrap:wrap;gap:8px;overflow-y:auto;align-content:flex-start;flex:1 1 auto;min-height:0;padding-bottom:20px;-webkit-overflow-scrolling:touch;}
 .chip{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 14px;
   font-size:14px;font-weight:600;color:var(--text);min-height:44px;display:flex;align-items:center;}
 .chip.active{background:var(--accent);color:#04140e;border-color:var(--accent);}
 #city-wrap{flex:1;display:flex;flex-direction:column;min-height:0;margin-top:6px;}
 #city-list{flex:1;}
 #picker .hint{font-size:11px;color:var(--dim);text-align:center;margin-top:10px;}
-#pick-status{font-size:12px;color:var(--accent);text-align:center;padding:8px;min-height:20px;}
+#pick-status{font-size:12px;color:var(--accent);text-align:center;padding:8px;min-height:20px;flex:0 0 auto;}
 
 /* ===== ローディング ===== */
 #loading{position:fixed;inset:0;z-index:1400;background:#0a0e14;display:none;flex-direction:column;
@@ -101,16 +105,15 @@ html,body{width:100%;height:100%;overflow:hidden;background:#0a0e14;font-family:
 </div>
 
 <div id="picker" style="display:none">
-  <h1>パラレル日本</h1>
-  <div class="sub">本物の日本を、もう一つの世界線で生きる</div>
-  <div class="pick-sec">都道府県</div>
-  <div id="pref-list"></div>
-  <div id="city-wrap">
-    <div class="pick-sec">市区町村</div>
+  <div id="pref-view">
+    <div class="pick-head">出発する都道府県</div>
+    <div id="pref-list"></div>
+    <div id="pick-status">整備都市を取得中...</div>
+  </div>
+  <div id="city-view" style="display:none">
+    <div class="pick-head"><button id="back-pref" onclick="backToPref()">‹ 都道府県</button><span id="city-head-name"></span></div>
     <div id="city-list"></div>
   </div>
-  <div id="pick-status">整備都市データを取得中...</div>
-  <div class="hint">PLATEAU 整備済みの都市が選べます（国の整備で自動的に増えます）</div>
 </div>
 
 <!-- ローディング -->
@@ -336,8 +339,6 @@ function buildPrefList(){
 }
 function selectPref(pref, chip){
   selectedPref = pref;
-  document.querySelectorAll('#pref-list .chip').forEach(c=>c.classList.remove('active'));
-  chip.classList.add('active');
   const wrap = document.getElementById('city-list');
   wrap.innerHTML='';
   const cities = allCities[pref].slice().sort((a,b)=>a.city.localeCompare(b.city,'ja'));
@@ -347,6 +348,14 @@ function selectPref(pref, chip){
     cc.onclick = ()=>enterCity(c);
     wrap.appendChild(cc);
   }
+  document.getElementById('city-head-name').textContent = pref;
+  document.getElementById('pref-view').style.display='none';
+  document.getElementById('city-view').style.display='flex';
+  wrap.scrollTop = 0;
+}
+function backToPref(){
+  document.getElementById('city-view').style.display='none';
+  document.getElementById('pref-view').style.display='flex';
 }
 
 // ============================================================
@@ -388,6 +397,8 @@ function backToPicker(){
   S.flying=false;
   document.getElementById('controls').style.display='none';
   document.getElementById('place-name').textContent='';
+  document.getElementById('city-view').style.display='none';
+  document.getElementById('pref-view').style.display='flex';
   document.getElementById('picker').style.display='flex';
 }
 
