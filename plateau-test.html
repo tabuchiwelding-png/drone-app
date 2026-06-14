@@ -48,8 +48,8 @@ const log = (m) => { document.getElementById('status').textContent = m; };
     viewer.scene.globe.depthTestAgainstTerrain = false;
     log('地球OK。PLATEAU新宿区の実建物を読み込み中...\n（初回は数十秒かかることがあります）');
 
-    // PLATEAU 新宿区 建築物モデル（テクスチャ付き・低解像度）公開3D Tiles
-    const url = 'https://plateau.geospatial.jp/main/data/3d-tiles/bldg/13100_tokyo/13104_shinjuku-ku/low_resolution/tileset.json';
+    // PLATEAU 新宿区 建築物モデル LOD2（テクスチャ付き）現行CDN（reearth）
+    const url = 'https://assets.cms.plateau.reearth.io/assets/ad/52340f-3f7f-470e-918e-38eb9c27e2db/13104_shinjuku-ku_pref_2023_citygml_2_op_bldg_3dtiles_13104_shinjuku-ku_lod2/tileset.json';
     const tileset = await Cesium.Cesium3DTileset.fromUrl(url, { maximumScreenSpaceError: 16 });
     viewer.scene.primitives.add(tileset);
 
@@ -80,4 +80,3 @@ const log = (m) => { document.getElementById('status').textContent = m; };
 </script>
 </body>
 </html>
-
